@@ -79,6 +79,13 @@
   .pill-no { background: #fdeceb; color: var(--danger); }
   .group-label { font-size: 12px; font-weight: 800; color: var(--muted); margin: 18px 2px 8px; }
   .group-label:first-child { margin-top: 0; }
+  .day-header { font-size: 15px; font-weight: 800; color: var(--primary-dark); margin: 0 2px 14px; }
+  .class-header {
+    font-size: 14px; font-weight: 800; color: var(--text); margin: 20px 2px 8px;
+    padding-bottom: 6px; border-bottom: 2px solid var(--primary);
+  }
+  .class-header:first-of-type { margin-top: 0; }
+  .time-header { font-size: 12px; font-weight: 700; color: var(--muted); margin: 10px 2px 6px 4px; }
 
   .setup {
     max-width: 420px; margin: 60px auto; padding: 26px 22px; background: var(--card);
@@ -278,20 +285,31 @@
     });
 
     var presentCount = 0;
+    var prevCls = undefined, prevTime = undefined;
     var html = expected.map(function (s) {
+      var pieces = '';
+      if (s.class_name !== prevCls) {
+        pieces += '<div class="class-header">' + (s.class_name ? escapeHtml(s.class_name) : '반 미지정') + '</div>';
+        prevCls = s.class_name;
+        prevTime = undefined;
+      }
+      if (s.time_slot !== prevTime) {
+        pieces += '<div class="time-header">' + (s.time_slot ? escapeHtml(s.time_slot) : '시간 미지정') + '</div>';
+        prevTime = s.time_slot;
+      }
       var rec = attendance.find(function (a) { return a.student_id === s.id; });
       if (rec) presentCount++;
-      return '<div class="item' + (rec ? '' : ' absent') + '">' +
-        '<div class="left"><div class="name">' + escapeHtml(s.student_name) + '</div>' +
-        '<div class="meta">' + metaHtml(s.class_name, DAY_LABELS[wKey], s.time_slot) + '</div></div>' +
+      pieces += '<div class="item' + (rec ? '' : ' absent') + '">' +
+        '<div class="left"><div class="name">' + escapeHtml(s.student_name) + '</div></div>' +
         '<div class="right">' +
         (rec ? '<span class="pill pill-ok">출석</span>' : '<span class="pill pill-no">미출석</span>') +
         (rec ? '<span class="time">' + fmtTime(rec.checked_in_at) + '</span>' : '') +
         '</div></div>';
+      return pieces;
     }).join('');
 
     var label = DAY_LABELS[wKey] + '요일 (' + dateLabel + (isToday ? ' · 오늘' : '') + ') — ' + presentCount + ' / ' + expected.length + '명 출석';
-    list.innerHTML = '<div class="group-label">' + label + '</div>' + html;
+    list.innerHTML = '<div class="day-header">' + label + '</div>' + html;
   }
 
   function renderAll() {
