@@ -64,6 +64,13 @@
   .item .meta { font-size: 12px; color: var(--muted); }
   .item .meta span { display: inline-block; background: #eef1fa; border-radius: 6px; padding: 1px 7px; margin-right: 4px; font-weight: 700; color: var(--muted); }
   .item .time { font-size: 13px; font-weight: 700; color: var(--primary-dark); white-space: nowrap; }
+  .item.absent { opacity: 0.6; }
+  .item .right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; }
+  .pill-ok { background: #e5f8ef; color: var(--success); }
+  .pill-no { background: #fdeceb; color: var(--danger); }
+  .group-label { font-size: 12px; font-weight: 800; color: var(--muted); margin: 18px 2px 8px; }
+  .group-label:first-child { margin-top: 0; }
 
   .setup {
     max-width: 420px; margin: 60px auto; padding: 26px 22px; background: var(--card);
@@ -106,8 +113,8 @@
   <div class="container">
     <div class="status-row"><span class="dot" id="statusDot"></span><span id="statusText">실시간 연결됨 (10초마다 갱신)</span></div>
     <div class="filter-row">
-      <button class="filter-btn active" data-f="today">오늘만</button>
-      <button class="filter-btn" data-f="all">전체 최근 100건</button>
+      <button class="filter-btn active" data-f="today">오늘 출석표</button>
+      <button class="filter-btn" data-f="all">전체 최근 기록</button>
     </div>
     <div id="list"></div>
   </div>
@@ -163,12 +170,15 @@
     }
   });
 
+  var DAY_KEYS = ['sun','mon','tue','wed','thu','fri','sat'];
+  var DAY_LABELS = {sun:'일', mon:'월', tue:'화', wed:'수', thu:'목', fri:'금', sat:'토'};
+
   document.querySelectorAll('.filter-btn').forEach(function (btn) {
     btn.addEventListener('click', function () {
       document.querySelectorAll('.filter-btn').forEach(function (b) { b.classList.remove('active'); });
       btn.classList.add('active');
       filter = btn.getAttribute('data-f');
-      renderList(lastRows || []);
+      render();
     });
   });
 
@@ -176,6 +186,8 @@
     var n = new Date();
     return n.getFullYear() + '-' + ('0'+(n.getMonth()+1)).slice(-2) + '-' + ('0'+n.getDate()).slice(-2);
   }
+
+  function todayDayKey() { return DAY_KEYS[new Date().getDay()]; }
 
   function escapeHtml(s) {
     return String(s || '').replace(/[&<>"']/g, function (c) {
@@ -188,29 +200,69 @@
     return ('0'+d.getHours()).slice(-2) + ':' + ('0'+d.getMinutes()).slice(-2);
   }
 
-  var lastRows = null;
+  var lastRows = [];
+  var lastStudents = [];
 
-  function renderList(rows) {
+  function metaHtml(clsName, dayLabel, timeSlot) {
+    var bits = [];
+    if (clsName) bits.push('<span>' + escapeHtml(clsName) + '</span>');
+    if (dayLabel) bits.push('<span>' + escapeHtml(dayLabel) + '요일</span>');
+    if (timeSlot) bits.push('<span>' + escapeHtml(timeSlot) + '</span>');
+    return bits.join('');
+  }
+
+  function renderToday() {
     var list = document.getElementById('list');
-    var filtered = rows;
-    if (filter === 'today') {
-      var t = todayStr();
-      filtered = rows.filter(function (r) { return (r.checked_in_at || '').slice(0,10) === t; });
+    var wKey = todayDayKey();
+    var t = todayStr();
+    var todaysAttendance = lastRows.filter(function (r) { return (r.checked_in_at || '').slice(0,10) === t; });
+    var expected = lastStudents.filter(function (s) { return (s.days || []).indexOf(wKey) !== -1; });
+
+    if (expected.length === 0) {
+      list.innerHTML = '<div class="empty">오늘(' + DAY_LABELS[wKey] + '요일) 등록된 클리닉 학생이 없습니다.<br>(명단이 아직 동기화되지 않았을 수도 있어요)</div>';
+      return;
     }
-    if (filtered.length === 0) {
+
+    expected = expected.slice().sort(function (a, b) {
+      var c = (a.class_name||'').localeCompare(b.class_name||'');
+      if (c !== 0) return c;
+      var ti = (a.time_slot||'').localeCompare(b.time_slot||'');
+      if (ti !== 0) return ti;
+      return (a.student_name||'').localeCompare(b.student_name||'', 'ko');
+    });
+
+    var presentCount = 0;
+    var html = expected.map(function (s) {
+      var rec = todaysAttendance.find(function (a) { return a.student_id === s.id; });
+      if (rec) presentCount++;
+      return '<div class="item' + (rec ? '' : ' absent') + '">' +
+        '<div class="left"><div class="name">' + escapeHtml(s.student_name) + '</div>' +
+        '<div class="meta">' + metaHtml(s.class_name, DAY_LABELS[wKey], s.time_slot) + '</div></div>' +
+        '<div class="right">' +
+        (rec ? '<span class="pill pill-ok">출석</span>' : '<span class="pill pill-no">미출석</span>') +
+        (rec ? '<span class="time">' + fmtTime(rec.checked_in_at) + '</span>' : '') +
+        '</div></div>';
+    }).join('');
+
+    list.innerHTML = '<div class="group-label">' + DAY_LABELS[wKey] + '요일 명단 — ' + presentCount + ' / ' + expected.length + '명 출석</div>' + html;
+  }
+
+  function renderAll() {
+    var list = document.getElementById('list');
+    if (lastRows.length === 0) {
       list.innerHTML = '<div class="empty">아직 체크인 기록이 없습니다.</div>';
       return;
     }
-    list.innerHTML = filtered.map(function (r) {
-      var metaBits = [];
-      if (r.class_name) metaBits.push('<span>' + escapeHtml(r.class_name) + '</span>');
-      if (r.day_label) metaBits.push('<span>' + escapeHtml(r.day_label) + '요일</span>');
-      if (r.time_slot) metaBits.push('<span>' + escapeHtml(r.time_slot) + '</span>');
+    list.innerHTML = lastRows.map(function (r) {
       return '<div class="item">' +
         '<div class="left"><div class="name">' + escapeHtml(r.student_name) + '</div>' +
-        '<div class="meta">' + metaBits.join('') + '</div></div>' +
+        '<div class="meta">' + metaHtml(r.class_name, r.day_label, r.time_slot) + '</div></div>' +
         '<div class="time">' + fmtTime(r.checked_in_at) + '</div></div>';
     }).join('');
+  }
+
+  function render() {
+    if (filter === 'today') renderToday(); else renderAll();
   }
 
   function setStatus(ok, text) {
@@ -220,18 +272,24 @@
 
   function fetchData(isFirstConnect) {
     if (!cfg) { showSetup(); return; }
-    fetch(cfg.url + '/rest/v1/clinic_attendance?select=*&order=checked_in_at.desc&limit=100', {
-      headers: { 'apikey': cfg.key, 'Authorization': 'Bearer ' + cfg.key }
-    }).then(function (res) {
-      if (!res.ok) throw new Error('http ' + res.status);
-      return res.json();
-    }).then(function (rows) {
+    var headers = { 'apikey': cfg.key, 'Authorization': 'Bearer ' + cfg.key };
+    Promise.all([
+      fetch(cfg.url + '/rest/v1/clinic_attendance?select=*&order=checked_in_at.desc&limit=200', { headers: headers }).then(function (res) {
+        if (!res.ok) throw new Error('http ' + res.status);
+        return res.json();
+      }),
+      fetch(cfg.url + '/rest/v1/clinic_students?select=*', { headers: headers }).then(function (res) {
+        if (!res.ok) throw new Error('http ' + res.status);
+        return res.json();
+      })
+    ]).then(function (results) {
       if (isFirstConnect) {
         localStorage.setItem(LS_KEY, JSON.stringify(cfg));
         showMain();
       }
-      lastRows = rows;
-      renderList(rows);
+      lastRows = results[0];
+      lastStudents = results[1];
+      render();
       var now = new Date();
       document.getElementById('lastUpdated').textContent = '마지막 갱신: ' + ('0'+now.getHours()).slice(-2) + ':' + ('0'+now.getMinutes()).slice(-2) + ':' + ('0'+now.getSeconds()).slice(-2);
       setStatus(true, '실시간 연결됨 (10초마다 갱신)');
