@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>클리닉 출석 체크</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../icon.svg">
+<meta name="theme-color" content="#2f6fed">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="클리닉 체크인">
+<style>
+  :root {
+    --primary: #2f6fed;
+    --primary-dark: #1e4fbf;
+    --success: #1fa971;
+    --danger: #e5484d;
+    --warn: #e8a33d;
+    --bg: #f4f6fb;
+    --card: #ffffff;
+    --text: #1a2233;
+    --muted: #6b7690;
+    --border: #e2e6f0;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text);
+    overflow: hidden;
+  }
+  #app { height: 100%; width: 100%; position: relative; }
+
+  /* ---------- Kiosk view ---------- */
+  #kiosk {
+    height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .kiosk-header {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 18px 28px;
+  }
+  .date-badge { font-size: 20px; color: var(--muted); font-weight: 600; }
+  .clinic-title { font-size: 26px; font-weight: 800; color: var(--primary-dark); letter-spacing: -0.5px; }
+  .gear-btn {
+    width: 44px; height: 44px; border-radius: 50%; border: none; background: transparent;
+    color: var(--border); font-size: 22px; cursor: pointer;
+  }
+  .gear-btn:active { background: #e9ecf5; }
+
+  .phone-display {
+    font-size: 44px; font-weight: 700; letter-spacing: 2px; color: var(--text);
+    background: var(--card); border: 2px solid var(--border); border-radius: 18px;
+    min-width: 420px; text-align: center; padding: 22px 18px; margin-bottom: 26px;
+    box-shadow: 0 2px 10px rgba(30,40,80,0.05);
+  }
+  .phone-display.placeholder { color: #c3c9db; }
+
+  .keypad {
+    display: grid; grid-template-columns: repeat(3, 100px); gap: 16px;
+  }
+  .key {
+    height: 90px; width: 100px; font-size: 32px; font-weight: 700;
+    border-radius: 20px; border: none; background: var(--card); color: var(--text);
+    box-shadow: 0 2px 6px rgba(30,40,80,0.08); cursor: pointer;
+  }
+  .key:active { background: #e9ecf5; transform: scale(0.97); }
+  .key.action { background: #eef1fa; color: var(--muted); font-size: 22px; }
+  .key.confirm { background: var(--primary); color: #fff; }
+  .key.confirm:active { background: var(--primary-dark); }
+
+  .hint { margin-top: 22px; color: var(--muted); font-size: 16px; }
+
+  /* ---------- Result overlay ---------- */
+  #result {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    flex-direction: column; text-align: center; padding: 40px;
+  }
+  #result.show { display: flex; }
+  #result.ok { background: rgba(31,169,113,0.97); color: #fff; }
+  #result.warn { background: rgba(232,163,61,0.97); color: #fff; }
+  #result.err { background: rgba(229,72,77,0.97); color: #fff; }
+  .result-icon { font-size: 90px; margin-bottom: 12px; }
+  .result-name { font-size: 48px; font-weight: 800; margin-bottom: 8px; }
+  .result-msg { font-size: 24px; font-weight: 500; opacity: 0.95; }
+
+  /* ---------- Admin ---------- */
+  #admin {
+    display: none; height: 100%; overflow-y: auto; background: var(--bg);
+  }
+  #admin.show { display: block; }
+  .admin-topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 24px; background: var(--card); border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 5;
+  }
+  .admin-topbar h1 { font-size: 20px; margin: 0; }
+  .tabs { display: flex; gap: 8px; }
+  .tab-btn {
+    padding: 10px 18px; border-radius: 10px; border: 1px solid var(--border); background: #fff;
+    font-size: 15px; font-weight: 600; color: var(--muted); cursor: pointer;
+  }
+  .tab-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .exit-btn {
+    padding: 10px 16px; border-radius: 10px; border: none; background: #eef1fa; color: var(--text);
+    font-weight: 600; cursor: pointer; font-size: 14px;
+  }
+  .admin-body { padding: 20px 24px 60px; max-width: 900px; margin: 0 auto; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; margin-bottom: 18px; }
+  .card h2 { font-size: 16px; margin: 0 0 14px; }
+  .form-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  input[type=text], input[type=tel], input[type=date], input[type=password] {
+    padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 15px; flex: 1; min-width: 120px;
+  }
+  .day-checks { display: flex; gap: 6px; flex-wrap: wrap; }
+  .day-chip { position: relative; }
+  .day-chip input { position: absolute; opacity: 0; width: 100%; height: 100%; margin:0; cursor:pointer; }
+  .day-chip label {
+    display: inline-block; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--border);
+    background: #fff; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer;
+  }
+  .day-chip input:checked + label { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+  .btn { padding: 10px 18px; border-radius: 8px; border: none; font-weight: 700; cursor: pointer; font-size: 14px; }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-danger { background: #fdeceb; color: var(--danger); }
+  .btn-ghost { background: #eef1fa; color: var(--text); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-size: 13px; font-weight: 700; }
+  .pill { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .pill-ok { background: #e5f8ef; color: var(--success); }
+  .pill-no { background: #fdeceb; color: var(--danger); }
+  .pill-extra { background: #fdf3e2; color: var(--warn); }
+  .day-badges span { display:inline-block; background:#eef1fa; color:var(--muted); border-radius:6px; padding:2px 6px; font-size:11px; margin-right:3px; font-weight:700;}
+  .row-del { color: var(--danger); background: none; border: none; cursor: pointer; font-size: 18px; }
+
+  .pin-gate {
+    position: fixed; inset: 0; background: rgba(20,26,45,0.55); display: flex; align-items: center; justify-content: center; z-index: 50;
+  }
+  .pin-box { background: #fff; border-radius: 16px; padding: 28px 30px; width: 300px; text-align: center; }
+  .pin-box h3 { margin: 0 0 14px; font-size: 17px; }
+  .pin-box input { width: 100%; text-align: center; font-size: 22px; letter-spacing: 6px; padding: 12px; margin-bottom: 12px; }
+  .muted-small { color: var(--muted); font-size: 12px; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- KIOSK VIEW -->
+  <div id="kiosk">
+    <div class="kiosk-header">
+      <div>
+        <div class="clinic-title">📋 클리닉 출석 체크</div>
+        <div class="date-badge" id="todayLabel"></div>
+      </div>
+      <button class="gear-btn" id="openAdminBtn" title="관리자">⚙</button>
+    </div>
+
+    <div class="phone-display placeholder" id="phoneDisplay">전화번호 뒷자리 4자리</div>
+    <div class="keypad" id="keypad">
+      <button class="key" data-k="1">1</button>
+      <button class="key" data-k="2">2</button>
+      <button class="key" data-k="3">3</button>
+      <button class="key" data-k="4">4</button>
+      <button class="key" data-k="5">5</button>
+      <button class="key" data-k="6">6</button>
+      <button class="key" data-k="7">7</button>
+      <button class="key" data-k="8">8</button>
+      <button class="key" data-k="9">9</button>
+      <button class="key action" data-k="clear">전체삭제</button>
+      <button class="key" data-k="0">0</button>
+      <button class="key action" data-k="back">⌫</button>
+    </div>
+    <button class="key confirm" id="confirmBtn" style="width:340px; margin-top:18px;">출석 확인</button>
+    <div class="hint">전화번호 뒷자리 4자리 입력 후 [출석 확인]을 눌러주세요</div>
+  </div>
+
+  <!-- RESULT OVERLAY -->
+  <div id="result">
+    <div class="result-icon" id="resultIcon">✅</div>
+    <div class="result-name" id="resultName"></div>
+    <div class="result-msg" id="resultMsg"></div>
+  </div>
+
+  <!-- ADMIN VIEW -->
+  <div id="admin">
+    <div class="admin-topbar">
+      <h1>관리자 화면</h1>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="students">학생 관리</button>
+        <button class="tab-btn" data-tab="attendance">출석 현황</button>
+        <button class="tab-btn" data-tab="settings">설정</button>
+      </div>
+      <button class="exit-btn" id="exitAdminBtn">← 출석화면으로</button>
+    </div>
+
+    <div class="admin-body">
+      <!-- Students panel -->
+      <div class="panel active" id="panel-students">
+        <div class="card">
+          <h2>학생 추가</h2>
+          <div class="form-row">
+            <input type="text" id="newName" placeholder="이름">
+            <input type="tel" id="newPhone" placeholder="전화번호 뒷자리 4자리 (예: 9534)" maxlength="4" inputmode="numeric">
+            <input type="text" id="newClass" placeholder="반 (예: 한백고1)" style="max-width:140px;">
+            <input type="text" id="newTime" placeholder="시간(선택, 예: 3:30)" style="max-width:140px;">
+          </div>
+          <div class="form-row">
+            <div class="day-checks" id="newDays"></div>
+          </div>
+          <button class="btn btn-primary" id="addStudentBtn">+ 학생 등록</button>
+        </div>
+        <div class="card">
+          <h2>일괄 등록 (한 줄에 한 명씩)</h2>
+          <div class="muted-small" style="margin-bottom:8px;">형식: 이름,코드4자리,요일글자(월화수목금토일 중 해당 글자, 여러 요일이면 붙여쓰기),반,시간(선택)<br>예) 노현채,9534,수,한백고1,3:30 &nbsp;/&nbsp; 김현서,1362,수목,한백고1,3:30</div>
+          <textarea id="bulkText" rows="6" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border); font-size:14px; font-family:inherit;" placeholder="노현채,9534,수,한백고1,3:30&#10;강민호,3523,수,한백고1,3:30"></textarea>
+          <div style="margin-top:10px;"><button class="btn btn-primary" id="bulkAddBtn">일괄 등록 실행</button></div>
+        </div>
+        <div class="card">
+          <h2>등록된 학생 (<span id="studentCount">0</span>명)</h2>
+          <table>
+            <thead><tr><th>이름</th><th>전화번호</th><th>반</th><th>시간</th><th>클리닉 요일</th><th></th></tr></thead>
+            <tbody id="studentTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Attendance panel -->
+      <div class="panel" id="panel-attendance">
+        <div class="card">
+          <h2>날짜 선택</h2>
+          <div class="form-row">
+            <input type="date" id="attDate">
+            <span id="attDayLabel" style="align-self:center; font-weight:700; color:var(--primary-dark);"></span>
+          </div>
+        </div>
+        <div class="card">
+          <h2>이날 클리닉 명단 출석 현황</h2>
+          <table>
+            <thead><tr><th>이름</th><th>전화번호</th><th>반</th><th>시간</th><th>상태</th><th>체크인 시각</th></tr></thead>
+            <tbody id="attTableBody"></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <h2>명단 외 출석 (다른 요일 학생이 체크인한 경우)</h2>
+          <table>
+            <thead><tr><th>이름</th><th>전화번호</th><th>반</th><th>체크인 시각</th></tr></thead>
+            <tbody id="extraTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Settings panel -->
+      <div class="panel" id="panel-settings">
+        <div class="card">
+          <h2>실시간 연동 (폰에서 확인)</h2>
+          <div class="muted-small" style="margin-bottom:10px;">체크인할 때마다 슈파베이스로 기록을 보내서, 폰에서 실시간으로 볼 수 있게 합니다.</div>
+          <div class="form-row">
+            <input type="text" id="sbUrl" placeholder="Supabase Project URL (예: https://xxxx.supabase.co)">
+          </div>
+          <div class="form-row">
+            <input type="text" id="sbKey" placeholder="Supabase anon/publishable key">
+          </div>
+          <div class="form-row">
+            <button class="btn btn-primary" id="sbSaveBtn">저장</button>
+            <button class="btn btn-ghost" id="sbTestBtn">테스트 전송</button>
+          </div>
+          <div class="muted-small" id="sbStatus"></div>
+          <div class="form-row" style="margin-top:14px; border-top:1px solid var(--border); padding-top:14px;">
+            <button class="btn btn-ghost" id="sbSyncRosterBtn">📋 학생 명단 지금 동기화</button>
+          </div>
+          <div class="muted-small" id="sbRosterStatus">명단을 추가/수정/삭제하면 자동으로 동기화되지만, 안 될 때 이 버튼으로 수동 동기화할 수 있어요.</div>
+        </div>
+        <div class="card">
+          <h2>관리자 PIN 변경</h2>
+          <div class="form-row">
+            <input type="password" id="newPin" placeholder="새 4자리 PIN" maxlength="8">
+            <button class="btn btn-primary" id="savePinBtn">저장</button>
+          </div>
+          <div class="muted-small">기본 PIN은 0000 입니다.</div>
+        </div>
+        <div class="card">
+          <h2>데이터 백업 / 복원</h2>
+          <div class="form-row">
+            <button class="btn btn-ghost" id="exportBtn">⬇ 백업 파일 내보내기 (JSON)</button>
+            <input type="file" id="importFile" accept="application/json" style="display:none;">
+            <button class="btn btn-ghost" id="importBtn">⬆ 백업 파일 가져오기</button>
+          </div>
+        </div>
+        <div class="card">
+          <h2>초기화</h2>
+          <button class="btn btn-danger" id="resetBtn">모든 데이터 삭제</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PIN GATE -->
+  <div class="pin-gate" id="pinGate" style="display:none;">
+    <div class="pin-box">
+      <h3>관리자 PIN 입력</h3>
+      <input type="password" id="pinInput" maxlength="8" inputmode="numeric">
+      <div class="form-row" style="justify-content:center;">
+        <button class="btn btn-primary" id="pinSubmit" style="flex:1;">확인</button>
+        <button class="btn btn-ghost" id="pinCancel" style="flex:1;">취소</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var DAY_KEYS = ['sun','mon','tue','wed','thu','fri','sat'];
+  var DAY_LABELS = {sun:'일', mon:'월', tue:'화', wed:'수', thu:'목', fri:'금', sat:'토'};
+  var STORAGE_KEY = 'clinicAttendance.v1';
+
+  function loadData() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return { students: [], attendance: [], pin: '0000' };
+  }
+  function saveData() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  var state = loadData();
+  if (!state.pin) state.pin = '0000';
+  if (!state.sbUrl) state.sbUrl = '';
+  if (!state.sbKey) state.sbKey = '';
+
+  function digitsOnly(s) { return (s || '').replace(/\D/g, ''); }
+  function formatPhone(d) { return d; }
+  function todayKey(dateObj) {
+    var y = dateObj.getFullYear(), m = ('0'+(dateObj.getMonth()+1)).slice(-2), d = ('0'+dateObj.getDate()).slice(-2);
+    return y + '-' + m + '-' + d;
+  }
+  function dayKeyOf(dateObj) { return DAY_KEYS[dateObj.getDay()]; }
+  function uid() { return 'id' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+  // ---------------- KIOSK ----------------
+  var phone = '';
+  var phoneDisplay = document.getElementById('phoneDisplay');
+  var resultEl = document.getElementById('result');
+  var resultIcon = document.getElementById('resultIcon');
+  var resultName = document.getElementById('resultName');
+  var resultMsg = document.getElementById('resultMsg');
+
+  function renderPhone() {
+    if (!phone) {
+      phoneDisplay.textContent = '전화번호 뒷자리 4자리';
+      phoneDisplay.classList.add('placeholder');
+    } else {
+      phoneDisplay.textContent = formatPhone(phone);
+      phoneDisplay.classList.remove('placeholder');
+    }
+  }
+
+  function updateTodayLabel() {
+    var now = new Date();
+    var label = (now.getMonth()+1) + '월 ' + now.getDate() + '일 (' + DAY_LABELS[dayKeyOf(now)] + ') ' +
+      ('0'+now.getHours()).slice(-2) + ':' + ('0'+now.getMinutes()).slice(-2);
+    document.getElementById('todayLabel').textContent = label;
+  }
+  updateTodayLabel();
+  setInterval(updateTodayLabel, 15000);
+
+  document.getElementById('keypad').addEventListener('click', function (e) {
+    var btn = e.target.closest('.key');
+    if (!btn) return;
+    var k = btn.getAttribute('data-k');
+    if (k === 'clear') phone = '';
+    else if (k === 'back') phone = phone.slice(0, -1);
+    else if (phone.length < 4) phone += k;
+    renderPhone();
+  });
+
+  function showResult(type, icon, name, msg) {
+    resultEl.className = 'show ' + type;
+    resultIcon.textContent = icon;
+    resultName.textContent = name;
+    resultMsg.textContent = msg;
+    setTimeout(function () {
+      resultEl.className = '';
+      phone = '';
+      renderPhone();
+    }, 2600);
+  }
+
+  document.getElementById('confirmBtn').addEventListener('click', function () {
+    var d = digitsOnly(phone);
+    if (d.length !== 4) {
+      showResult('err', '⚠️', '', '전화번호 뒷자리 4자리를 입력해주세요');
+      return;
+    }
+    var student = state.students.find(function (s) { return s.phone === d; });
+    if (!student) {
+      showResult('err', '❓', '', '등록되지 않은 번호입니다\n관리자에게 문의해주세요');
+      return;
+    }
+    var now = new Date();
+    var dKey = todayKey(now);
+    var wKey = dayKeyOf(now);
+
+    var already = state.attendance.find(function (a) { return a.studentId === student.id && a.date === dKey; });
+    if (already) {
+      showResult('warn', '⏱️', student.name + '님', '이미 출석 처리되었습니다 (' + already.time + ')');
+      return;
+    }
+
+    var timeStr = ('0'+now.getHours()).slice(-2) + ':' + ('0'+now.getMinutes()).slice(-2);
+    state.attendance.push({ id: uid(), studentId: student.id, date: dKey, day: wKey, time: timeStr });
+    saveData();
+    syncAttendanceToCloud(student, wKey, timeStr);
+
+    var scheduled = student.days.indexOf(wKey) !== -1;
+    if (scheduled) {
+      showResult('ok', '✅', student.name + '님', '출석이 확인되었습니다!');
+    } else {
+      showResult('warn', '📌', student.name + '님', '출석 기록됨 (오늘은 지정 클리닉 요일이 아닙니다)');
+    }
+    if (adminOpen) refreshAttendancePanel();
+  });
+
+  renderPhone();
+
+  // ---------------- ADMIN NAV / PIN ----------------
+  var adminOpen = false;
+  var pinGate = document.getElementById('pinGate');
+  var pinInput = document.getElementById('pinInput');
+
+  document.getElementById('openAdminBtn').addEventListener('click', function () {
+    pinInput.value = '';
+    pinGate.style.display = 'flex';
+    setTimeout(function(){ pinInput.focus(); }, 50);
+  });
+  document.getElementById('pinCancel').addEventListener('click', function () {
+    pinGate.style.display = 'none';
+  });
+  document.getElementById('pinSubmit').addEventListener('click', submitPin);
+  pinInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') submitPin(); });
+
+  function submitPin() {
+    if (pinInput.value === state.pin) {
+      pinGate.style.display = 'none';
+      openAdmin();
+    } else {
+      pinInput.value = '';
+      pinInput.placeholder = 'PIN이 틀렸습니다';
+    }
+  }
+
+  function openAdmin() {
+    adminOpen = true;
+    document.getElementById('admin').classList.add('show');
+    document.getElementById('kiosk').style.display = 'none';
+    renderStudentTable();
+    var attDate = document.getElementById('attDate');
+    if (!attDate.value) attDate.value = todayKey(new Date());
+    refreshAttendancePanel();
+    document.getElementById('sbUrl').value = state.sbUrl;
+    document.getElementById('sbKey').value = state.sbKey;
+  }
+  document.getElementById('exitAdminBtn').addEventListener('click', function () {
+    adminOpen = false;
+    document.getElementById('admin').classList.remove('show');
+    document.getElementById('kiosk').style.display = 'flex';
+  });
+
+  document.querySelectorAll('.tab-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+      document.querySelectorAll('.panel').forEach(function (p) { p.classList.remove('active'); });
+      btn.classList.add('active');
+      document.getElementById('panel-' + btn.getAttribute('data-tab')).classList.add('active');
+    });
+  });
+
+  // ---------------- STUDENT MANAGEMENT ----------------
+  function buildDayChecks(container, prefix) {
+    container.innerHTML = '';
+    DAY_KEYS.forEach(function (k) {
+      var wrap = document.createElement('div');
+      wrap.className = 'day-chip';
+      var id = prefix + '-' + k;
+      wrap.innerHTML = '<input type="checkbox" id="' + id + '" value="' + k + '">' +
+        '<label for="' + id + '">' + DAY_LABELS[k] + '</label>';
+      container.appendChild(wrap);
+    });
+  }
+  buildDayChecks(document.getElementById('newDays'), 'newday');
+
+  function upsertStudent(name, phoneVal, days, classVal, timeVal) {
+    var existing = state.students.find(function (s) { return s.phone === phoneVal; });
+    if (existing) {
+      days.forEach(function (d) { if (existing.days.indexOf(d) === -1) existing.days.push(d); });
+      if (timeVal) {
+        if (!existing.time) existing.time = timeVal;
+        else if (existing.time.split('/').indexOf(timeVal) === -1) existing.time += '/' + timeVal;
+      }
+      if (classVal) existing.cls = classVal;
+      if (name) existing.name = name;
+    } else {
+      state.students.push({ id: uid(), name: name, phone: phoneVal, days: days, cls: classVal || '', time: timeVal || '' });
+    }
+    saveData();
+  }
+
+  document.getElementById('addStudentBtn').addEventListener('click', function () {
+    var name = document.getElementById('newName').value.trim();
+    var phoneVal = digitsOnly(document.getElementById('newPhone').value);
+    var classVal = document.getElementById('newClass').value.trim();
+    var timeVal = document.getElementById('newTime').value.trim();
+    var days = Array.prototype.slice.call(document.querySelectorAll('#newDays input:checked')).map(function (c) { return c.value; });
+    if (!name || phoneVal.length !== 4) {
+      alert('이름과 전화번호 뒷자리 4자리를 정확히 입력해주세요.');
+      return;
+    }
+    if (days.length === 0) {
+      alert('클리닉 요일을 하나 이상 선택해주세요.');
+      return;
+    }
+    upsertStudent(name, phoneVal, days, classVal, timeVal);
+    document.getElementById('newName').value = '';
+    document.getElementById('newPhone').value = '';
+    document.getElementById('newClass').value = '';
+    document.getElementById('newTime').value = '';
+    document.querySelectorAll('#newDays input:checked').forEach(function (c) { c.checked = false; });
+    renderStudentTable();
+    syncRosterToCloud();
+  });
+
+  document.getElementById('bulkAddBtn').addEventListener('click', function () {
+    var text = document.getElementById('bulkText').value;
+    var lines = text.split('\n').map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 0; });
+    var okCount = 0, failLines = [];
+    lines.forEach(function (line) {
+      var parts = line.split(',').map(function (p) { return p.trim(); });
+      var name = parts[0], code = digitsOnly(parts[1] || ''), dayStr = parts[2] || '', classVal = parts[3] || '', timeVal = parts[4] || '';
+      var days = [];
+      for (var i = 0; i < dayStr.length; i++) {
+        var ch = dayStr[i];
+        var key = DAY_KEYS.find(function (k) { return DAY_LABELS[k] === ch; });
+        if (key && days.indexOf(key) === -1) days.push(key);
+      }
+      if (!name || code.length !== 4 || days.length === 0) {
+        failLines.push(line);
+        return;
+      }
+      upsertStudent(name, code, days, classVal, timeVal);
+      okCount++;
+    });
+    renderStudentTable();
+    syncRosterToCloud();
+    var msg = okCount + '명 등록/업데이트 완료.';
+    if (failLines.length) msg += '\n\n형식이 맞지 않아 건너뜀:\n' + failLines.join('\n');
+    alert(msg);
+    document.getElementById('bulkText').value = '';
+  });
+
+  function renderStudentTable() {
+    var tbody = document.getElementById('studentTableBody');
+    tbody.innerHTML = '';
+    document.getElementById('studentCount').textContent = state.students.length;
+    state.students.slice().sort(function(a,b){
+      var c = (a.cls||'').localeCompare(b.cls||'');
+      if (c !== 0) return c;
+      return a.name.localeCompare(b.name, 'ko');
+    }).forEach(function (s) {
+      var tr = document.createElement('tr');
+      var badges = s.days.map(function (k) { return '<span>' + DAY_LABELS[k] + '</span>'; }).join('');
+      tr.innerHTML =
+        '<td>' + escapeHtml(s.name) + '</td>' +
+        '<td>' + formatPhone(s.phone) + '</td>' +
+        '<td>' + (s.cls ? escapeHtml(s.cls) : '-') + '</td>' +
+        '<td>' + (s.time ? escapeHtml(s.time) : '-') + '</td>' +
+        '<td class="day-badges">' + (badges || '<span style="opacity:.5">-</span>') + '</td>' +
+        '<td><button class="row-del" data-id="' + s.id + '">🗑</button></td>';
+      tbody.appendChild(tr);
+    });
+    tbody.querySelectorAll('.row-del').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-id');
+        var s = state.students.find(function (x) { return x.id === id; });
+        if (s && confirm(s.name + ' 학생을 삭제하시겠습니까? (출석 기록은 유지됩니다)')) {
+          state.students = state.students.filter(function (x) { return x.id !== id; });
+          saveData();
+          renderStudentTable();
+          refreshAttendancePanel();
+          syncRosterToCloud();
+        }
+      });
+    });
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, function (c) {
+      return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+  }
+
+  // ---------------- ATTENDANCE PANEL ----------------
+  var attDateInput = document.getElementById('attDate');
+  attDateInput.addEventListener('change', refreshAttendancePanel);
+
+  function refreshAttendancePanel() {
+    var dateVal = attDateInput.value || todayKey(new Date());
+    var parts = dateVal.split('-').map(Number);
+    var dateObj = new Date(parts[0], parts[1]-1, parts[2]);
+    var wKey = dayKeyOf(dateObj);
+    document.getElementById('attDayLabel').textContent = DAY_LABELS[wKey] + '요일';
+
+    var dayAttendance = state.attendance.filter(function (a) { return a.date === dateVal; });
+    var expected = state.students.filter(function (s) { return s.days.indexOf(wKey) !== -1; });
+
+    var tbody = document.getElementById('attTableBody');
+    tbody.innerHTML = '';
+    expected.slice().sort(function(a,b){
+      var c = (a.cls||'').localeCompare(b.cls||'');
+      if (c !== 0) return c;
+      var t = (a.time||'').localeCompare(b.time||'');
+      if (t !== 0) return t;
+      return a.name.localeCompare(b.name,'ko');
+    }).forEach(function (s) {
+      var rec = dayAttendance.find(function (a) { return a.studentId === s.id; });
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + escapeHtml(s.name) + '</td>' +
+        '<td>' + formatPhone(s.phone) + '</td>' +
+        '<td>' + (s.cls ? escapeHtml(s.cls) : '-') + '</td>' +
+        '<td>' + (s.time ? escapeHtml(s.time) : '-') + '</td>' +
+        '<td>' + (rec ? '<span class="pill pill-ok">출석</span>' : '<span class="pill pill-no">미출석</span>') + '</td>' +
+        '<td>' + (rec ? rec.time : '-') + '</td>';
+      tbody.appendChild(tr);
+    });
+    if (expected.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted)">이 요일에 등록된 클리닉 학생이 없습니다.</td></tr>';
+    }
+
+    var expectedIds = expected.map(function (s) { return s.id; });
+    var extra = dayAttendance.filter(function (a) { return expectedIds.indexOf(a.studentId) === -1; });
+    var extraBody = document.getElementById('extraTableBody');
+    extraBody.innerHTML = '';
+    extra.forEach(function (a) {
+      var s = state.students.find(function (x) { return x.id === a.studentId; });
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + (s ? escapeHtml(s.name) : '(삭제된 학생)') + '</td>' +
+        '<td>' + (s ? formatPhone(s.phone) : '-') + '</td>' +
+        '<td>' + (s && s.cls ? escapeHtml(s.cls) : '-') + '</td>' +
+        '<td>' + a.time + '</td>';
+      extraBody.appendChild(tr);
+    });
+    if (extra.length === 0) {
+      extraBody.innerHTML = '<tr><td colspan="4" style="color:var(--muted)">없음</td></tr>';
+    }
+  }
+
+  // ---------------- CLOUD SYNC (Supabase) ----------------
+  function syncAttendanceToCloud(student, wKey, timeStr) {
+    if (!state.sbUrl || !state.sbKey) return;
+    fetch(state.sbUrl.replace(/\/+$/, '') + '/rest/v1/clinic_attendance', {
+      method: 'POST',
+      headers: {
+        'apikey': state.sbKey,
+        'Authorization': 'Bearer ' + state.sbKey,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({
+        student_id: student.id,
+        student_name: student.name,
+        class_name: student.cls || null,
+        day_label: DAY_LABELS[wKey],
+        time_slot: student.time || null,
+        checked_in_at: new Date().toISOString()
+      })
+    }).catch(function () { /* offline or network error: local record is still safe */ });
+  }
+
+  function syncRosterToCloud() {
+    if (!state.sbUrl || !state.sbKey) return;
+    var base = state.sbUrl.replace(/\/+$/, '');
+    var headers = {
+      'apikey': state.sbKey,
+      'Authorization': 'Bearer ' + state.sbKey,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal'
+    };
+    return fetch(base + '/rest/v1/clinic_students?id=neq.__none__', { method: 'DELETE', headers: headers })
+      .then(function () {
+        if (state.students.length === 0) return;
+        var rows = state.students.map(function (s) {
+          return { id: s.id, student_name: s.name, class_name: s.cls || null, time_slot: s.time || null, days: s.days };
+        });
+        return fetch(base + '/rest/v1/clinic_students', { method: 'POST', headers: headers, body: JSON.stringify(rows) });
+      })
+      .catch(function () { /* offline or network error: will retry on next sync */ });
+  }
+
+  document.getElementById('sbSaveBtn').addEventListener('click', function () {
+    state.sbUrl = document.getElementById('sbUrl').value.trim().replace(/\/+$/, '');
+    state.sbKey = document.getElementById('sbKey').value.trim();
+    saveData();
+    document.getElementById('sbStatus').textContent = '저장되었습니다.';
+    syncRosterToCloud();
+  });
+
+  document.getElementById('sbSyncRosterBtn').addEventListener('click', function () {
+    var statusEl = document.getElementById('sbRosterStatus');
+    if (!state.sbUrl || !state.sbKey) { statusEl.textContent = '먼저 위에서 슈파베이스 연동을 저장해주세요.'; return; }
+    statusEl.textContent = '동기화 중...';
+    var result = syncRosterToCloud();
+    if (result && result.then) {
+      result.then(function () { statusEl.textContent = '✅ 명단 ' + state.students.length + '명 동기화 완료 (' + new Date().toLocaleTimeString('ko-KR') + ')'; });
+    }
+  });
+
+  document.getElementById('sbTestBtn').addEventListener('click', function () {
+    var url = document.getElementById('sbUrl').value.trim().replace(/\/+$/, '');
+    var key = document.getElementById('sbKey').value.trim();
+    var statusEl = document.getElementById('sbStatus');
+    if (!url || !key) { statusEl.textContent = 'URL과 키를 먼저 입력해주세요.'; return; }
+    statusEl.textContent = '전송 중...';
+    fetch(url + '/rest/v1/clinic_attendance', {
+      method: 'POST',
+      headers: {
+        'apikey': key,
+        'Authorization': 'Bearer ' + key,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({
+        student_name: '테스트',
+        class_name: '연동테스트',
+        day_label: DAY_LABELS[dayKeyOf(new Date())],
+        time_slot: null,
+        checked_in_at: new Date().toISOString()
+      })
+    }).then(function (res) {
+      statusEl.textContent = res.ok ? '✅ 테스트 성공! 폰 화면에서 확인해보세요.' : '❌ 실패 (HTTP ' + res.status + ') — URL/키 또는 SQL 설정을 확인해주세요.';
+    }).catch(function () {
+      statusEl.textContent = '❌ 연결 실패 — URL을 확인해주세요.';
+    });
+  });
+
+  // ---------------- SETTINGS ----------------
+  document.getElementById('savePinBtn').addEventListener('click', function () {
+    var v = document.getElementById('newPin').value.trim();
+    if (v.length < 4) { alert('4자리 이상 입력해주세요.'); return; }
+    state.pin = v;
+    saveData();
+    document.getElementById('newPin').value = '';
+    alert('PIN이 변경되었습니다.');
+  });
+
+  document.getElementById('exportBtn').addEventListener('click', function () {
+    var blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'clinic-attendance-backup-' + todayKey(new Date()) + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  var importFile = document.getElementById('importFile');
+  document.getElementById('importBtn').addEventListener('click', function () { importFile.click(); });
+  importFile.addEventListener('change', function () {
+    var file = importFile.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var data = JSON.parse(reader.result);
+        if (!data.students || !data.attendance) throw new Error('invalid');
+        state = data;
+        if (!state.pin) state.pin = '0000';
+        saveData();
+        renderStudentTable();
+        refreshAttendancePanel();
+        alert('백업 데이터를 불러왔습니다.');
+      } catch (e) {
+        alert('올바른 백업 파일이 아닙니다.');
+      }
+    };
+    reader.readAsText(file);
+    importFile.value = '';
+  });
+
+  document.getElementById('resetBtn').addEventListener('click', function () {
+    if (confirm('모든 학생 및 출석 데이터를 삭제합니다. 계속하시겠습니까?')) {
+      state = { students: [], attendance: [], pin: state.pin };
+      saveData();
+      renderStudentTable();
+      refreshAttendancePanel();
+    }
+  });
+
+})();
+</script>
+</body>
+</html>

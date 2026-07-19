@@ -1,0 +1,11 @@
+{
+  "name": "클리닉 출석 체크인",
+  "short_name": "클리닉체크인",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f6fb",
+  "theme_color": "#2f6fed",
+  "icons": [
+    { "src": "../icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
