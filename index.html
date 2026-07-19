@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>클리닉 출석 실시간 현황</title>
+<style>
+  :root {
+    --primary: #2f6fed;
+    --primary-dark: #1e4fbf;
+    --success: #1fa971;
+    --danger: #e5484d;
+    --bg: #f4f6fb;
+    --card: #ffffff;
+    --text: #1a2233;
+    --muted: #6b7690;
+    --border: #e2e6f0;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100%;
+    font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text);
+  }
+  .topbar {
+    position: sticky; top: 0; z-index: 5;
+    background: var(--card); border-bottom: 1px solid var(--border);
+    padding: 14px 16px; display: flex; align-items: center; justify-content: space-between;
+  }
+  .topbar h1 { font-size: 17px; margin: 0; }
+  .topbar .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .gear-btn { border: none; background: transparent; font-size: 20px; cursor: pointer; color: var(--muted); padding: 6px; }
+
+  .container { max-width: 480px; margin: 0 auto; padding: 14px 14px 40px; }
+
+  .status-row { display: flex; align-items: center; gap: 8px; margin: 6px 2px 14px; font-size: 13px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+  .dot.off { background: var(--danger); }
+
+  .filter-row { display: flex; gap: 8px; margin-bottom: 14px; }
+  .filter-btn {
+    flex: 1; padding: 9px; border-radius: 10px; border: 1px solid var(--border); background: #fff;
+    font-size: 13px; font-weight: 700; color: var(--muted); cursor: pointer;
+  }
+  .filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+  .empty { text-align: center; color: var(--muted); padding: 60px 20px; font-size: 14px; }
+
+  .item {
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 14px 16px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;
+    animation: fadein .3s ease;
+  }
+  @keyframes fadein { from { opacity: 0; transform: translateY(-4px);} to { opacity: 1; transform: translateY(0);} }
+  .item .left { display: flex; flex-direction: column; gap: 3px; }
+  .item .name { font-size: 16px; font-weight: 800; }
+  .item .meta { font-size: 12px; color: var(--muted); }
+  .item .meta span { display: inline-block; background: #eef1fa; border-radius: 6px; padding: 1px 7px; margin-right: 4px; font-weight: 700; color: var(--muted); }
+  .item .time { font-size: 13px; font-weight: 700; color: var(--primary-dark); white-space: nowrap; }
+
+  .setup {
+    max-width: 420px; margin: 60px auto; padding: 26px 22px; background: var(--card);
+    border: 1px solid var(--border); border-radius: 16px;
+  }
+  .setup h2 { font-size: 17px; margin: 0 0 6px; }
+  .setup p { font-size: 13px; color: var(--muted); margin: 0 0 16px; line-height: 1.5; }
+  .setup label { font-size: 12px; font-weight: 700; color: var(--muted); display: block; margin: 12px 0 5px; }
+  .setup input {
+    width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); font-size: 14px;
+  }
+  .setup button {
+    width: 100%; margin-top: 18px; padding: 12px; border-radius: 10px; border: none;
+    background: var(--primary); color: #fff; font-weight: 700; font-size: 14px; cursor: pointer;
+  }
+  .setup .err { color: var(--danger); font-size: 12px; margin-top: 8px; display: none; }
+</style>
+</head>
+<body>
+
+<div id="setupView" class="setup" style="display:none;">
+  <h2>📋 클리닉 출석 현황판</h2>
+  <p>슈파베이스 프로젝트 정보를 한 번만 입력하시면, 이 폰에 저장되어 다음부터는 바로 열립니다.</p>
+  <label>Project URL</label>
+  <input type="text" id="setupUrl" placeholder="https://xxxx.supabase.co">
+  <label>Anon Public Key</label>
+  <input type="text" id="setupKey" placeholder="eyJhbGciOi...">
+  <button id="setupSaveBtn">연결하기</button>
+  <div class="err" id="setupErr">연결에 실패했습니다. URL과 키를 다시 확인해주세요.</div>
+</div>
+
+<div id="mainView" style="display:none;">
+  <div class="topbar">
+    <div>
+      <h1>📋 클리닉 출석 현황</h1>
+      <div class="sub" id="lastUpdated">불러오는 중...</div>
+    </div>
+    <button class="gear-btn" id="settingsBtn">⚙</button>
+  </div>
+  <div class="container">
+    <div class="status-row"><span class="dot" id="statusDot"></span><span id="statusText">실시간 연결됨 (10초마다 갱신)</span></div>
+    <div class="filter-row">
+      <button class="filter-btn active" data-f="today">오늘만</button>
+      <button class="filter-btn" data-f="all">전체 최근 100건</button>
+    </div>
+    <div id="list"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var LS_KEY = 'clinicViewer.v1';
+  var cfg = null;
+  try { cfg = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch (e) {}
+
+  // allow one-time setup via URL hash: #u=<url>&k=<key>
+  if (!cfg && location.hash.length > 1) {
+    var hp = new URLSearchParams(location.hash.slice(1));
+    var hu = hp.get('u'), hk = hp.get('k');
+    if (hu && hk) {
+      cfg = { url: hu, key: hk };
+      localStorage.setItem(LS_KEY, JSON.stringify(cfg));
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+  }
+
+  var setupView = document.getElementById('setupView');
+  var mainView = document.getElementById('mainView');
+  var filter = 'today';
+
+  function showSetup() {
+    setupView.style.display = 'block';
+    mainView.style.display = 'none';
+  }
+  function showMain() {
+    setupView.style.display = 'none';
+    mainView.style.display = 'block';
+  }
+
+  document.getElementById('setupSaveBtn').addEventListener('click', function () {
+    var url = document.getElementById('setupUrl').value.trim().replace(/\/+$/, '');
+    var key = document.getElementById('setupKey').value.trim();
+    if (!url || !key) return;
+    cfg = { url: url, key: key };
+    document.getElementById('setupErr').style.display = 'none';
+    fetchData(true);
+  });
+
+  document.getElementById('settingsBtn').addEventListener('click', function () {
+    if (confirm('연결을 해제하고 다시 설정하시겠습니까?')) {
+      localStorage.removeItem(LS_KEY);
+      cfg = null;
+      document.getElementById('setupUrl').value = '';
+      document.getElementById('setupKey').value = '';
+      showSetup();
+    }
+  });
+
+  document.querySelectorAll('.filter-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.filter-btn').forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      filter = btn.getAttribute('data-f');
+      renderList(lastRows || []);
+    });
+  });
+
+  function todayStr() {
+    var n = new Date();
+    return n.getFullYear() + '-' + ('0'+(n.getMonth()+1)).slice(-2) + '-' + ('0'+n.getDate()).slice(-2);
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, function (c) {
+      return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+    });
+  }
+
+  function fmtTime(iso) {
+    var d = new Date(iso);
+    return ('0'+d.getHours()).slice(-2) + ':' + ('0'+d.getMinutes()).slice(-2);
+  }
+
+  var lastRows = null;
+
+  function renderList(rows) {
+    var list = document.getElementById('list');
+    var filtered = rows;
+    if (filter === 'today') {
+      var t = todayStr();
+      filtered = rows.filter(function (r) { return (r.checked_in_at || '').slice(0,10) === t; });
+    }
+    if (filtered.length === 0) {
+      list.innerHTML = '<div class="empty">아직 체크인 기록이 없습니다.</div>';
+      return;
+    }
+    list.innerHTML = filtered.map(function (r) {
+      var metaBits = [];
+      if (r.class_name) metaBits.push('<span>' + escapeHtml(r.class_name) + '</span>');
+      if (r.day_label) metaBits.push('<span>' + escapeHtml(r.day_label) + '요일</span>');
+      if (r.time_slot) metaBits.push('<span>' + escapeHtml(r.time_slot) + '</span>');
+      return '<div class="item">' +
+        '<div class="left"><div class="name">' + escapeHtml(r.student_name) + '</div>' +
+        '<div class="meta">' + metaBits.join('') + '</div></div>' +
+        '<div class="time">' + fmtTime(r.checked_in_at) + '</div></div>';
+    }).join('');
+  }
+
+  function setStatus(ok, text) {
+    document.getElementById('statusDot').classList.toggle('off', !ok);
+    document.getElementById('statusText').textContent = text;
+  }
+
+  function fetchData(isFirstConnect) {
+    if (!cfg) { showSetup(); return; }
+    fetch(cfg.url + '/rest/v1/clinic_attendance?select=*&order=checked_in_at.desc&limit=100', {
+      headers: { 'apikey': cfg.key, 'Authorization': 'Bearer ' + cfg.key }
+    }).then(function (res) {
+      if (!res.ok) throw new Error('http ' + res.status);
+      return res.json();
+    }).then(function (rows) {
+      if (isFirstConnect) {
+        localStorage.setItem(LS_KEY, JSON.stringify(cfg));
+        showMain();
+      }
+      lastRows = rows;
+      renderList(rows);
+      var now = new Date();
+      document.getElementById('lastUpdated').textContent = '마지막 갱신: ' + ('0'+now.getHours()).slice(-2) + ':' + ('0'+now.getMinutes()).slice(-2) + ':' + ('0'+now.getSeconds()).slice(-2);
+      setStatus(true, '실시간 연결됨 (10초마다 갱신)');
+    }).catch(function (err) {
+      if (isFirstConnect) {
+        document.getElementById('setupErr').style.display = 'block';
+        cfg = null;
+        return;
+      }
+      setStatus(false, '연결 오류 — 인터넷 연결을 확인해주세요');
+    });
+  }
+
+  if (cfg) { showMain(); fetchData(false); } else { showSetup(); }
+  setInterval(function () { if (cfg) fetchData(false); }, 10000);
+})();
+</script>
+</body>
+</html>
