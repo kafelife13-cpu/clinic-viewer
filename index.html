@@ -51,6 +51,14 @@
   }
   .filter-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
 
+  .day-row { display: flex; gap: 6px; margin-bottom: 14px; }
+  .day-btn {
+    flex: 1; padding: 8px 0; border-radius: 10px; border: 1px solid var(--border); background: #fff;
+    font-size: 13px; font-weight: 700; color: var(--muted); cursor: pointer;
+  }
+  .day-btn.today { box-shadow: inset 0 0 0 1.5px var(--primary-dark); }
+  .day-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+
   .empty { text-align: center; color: var(--muted); padding: 60px 20px; font-size: 14px; }
 
   .item {
@@ -113,9 +121,10 @@
   <div class="container">
     <div class="status-row"><span class="dot" id="statusDot"></span><span id="statusText">실시간 연결됨 (10초마다 갱신)</span></div>
     <div class="filter-row">
-      <button class="filter-btn active" data-f="today">오늘 출석표</button>
+      <button class="filter-btn active" data-f="today">출석표</button>
       <button class="filter-btn" data-f="all">전체 최근 기록</button>
     </div>
+    <div class="day-row" id="dayRow"></div>
     <div id="list"></div>
   </div>
 </div>
@@ -171,23 +180,57 @@
   });
 
   var DAY_KEYS = ['sun','mon','tue','wed','thu','fri','sat'];
+  var DAY_ORDER = ['mon','tue','wed','thu','fri','sat','sun'];
   var DAY_LABELS = {sun:'일', mon:'월', tue:'화', wed:'수', thu:'목', fri:'금', sat:'토'};
+
+  function todayDayKey() { return DAY_KEYS[new Date().getDay()]; }
+  var selectedDayKey = todayDayKey();
+
+  function dateStr(d) {
+    return d.getFullYear() + '-' + ('0'+(d.getMonth()+1)).slice(-2) + '-' + ('0'+d.getDate()).slice(-2);
+  }
+
+  // Resolves the selected weekday to a concrete date within the current Sun–Sat week.
+  function dateForDayKey(dayKey) {
+    var now = new Date();
+    var diff = DAY_KEYS.indexOf(dayKey) - now.getDay();
+    var d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diff);
+    return d;
+  }
+
+  var dayRow = document.getElementById('dayRow');
+  DAY_ORDER.forEach(function (k) {
+    var btn = document.createElement('button');
+    btn.className = 'day-btn' + (k === todayDayKey() ? ' today' : '');
+    btn.textContent = DAY_LABELS[k];
+    btn.setAttribute('data-day', k);
+    btn.addEventListener('click', function () {
+      selectedDayKey = k;
+      updateDayButtons();
+      render();
+    });
+    dayRow.appendChild(btn);
+  });
+  function updateDayButtons() {
+    dayRow.querySelectorAll('.day-btn').forEach(function (b) {
+      b.classList.toggle('active', b.getAttribute('data-day') === selectedDayKey);
+    });
+  }
+  updateDayButtons();
 
   document.querySelectorAll('.filter-btn').forEach(function (btn) {
     btn.addEventListener('click', function () {
       document.querySelectorAll('.filter-btn').forEach(function (b) { b.classList.remove('active'); });
       btn.classList.add('active');
       filter = btn.getAttribute('data-f');
+      dayRow.style.display = filter === 'today' ? 'flex' : 'none';
       render();
     });
   });
 
   function todayStr() {
-    var n = new Date();
-    return n.getFullYear() + '-' + ('0'+(n.getMonth()+1)).slice(-2) + '-' + ('0'+n.getDate()).slice(-2);
+    return dateStr(new Date());
   }
-
-  function todayDayKey() { return DAY_KEYS[new Date().getDay()]; }
 
   function escapeHtml(s) {
     return String(s || '').replace(/[&<>"']/g, function (c) {
@@ -213,13 +256,16 @@
 
   function renderToday() {
     var list = document.getElementById('list');
-    var wKey = todayDayKey();
-    var t = todayStr();
-    var todaysAttendance = lastRows.filter(function (r) { return (r.checked_in_at || '').slice(0,10) === t; });
+    var wKey = selectedDayKey;
+    var targetDate = dateForDayKey(wKey);
+    var t = dateStr(targetDate);
+    var isToday = wKey === todayDayKey();
+    var dateLabel = (targetDate.getMonth()+1) + '월 ' + targetDate.getDate() + '일';
+    var attendance = lastRows.filter(function (r) { return (r.checked_in_at || '').slice(0,10) === t; });
     var expected = lastStudents.filter(function (s) { return (s.days || []).indexOf(wKey) !== -1; });
 
     if (expected.length === 0) {
-      list.innerHTML = '<div class="empty">오늘(' + DAY_LABELS[wKey] + '요일) 등록된 클리닉 학생이 없습니다.<br>(명단이 아직 동기화되지 않았을 수도 있어요)</div>';
+      list.innerHTML = '<div class="empty">' + DAY_LABELS[wKey] + '요일 등록된 클리닉 학생이 없습니다.<br>(명단이 아직 동기화되지 않았을 수도 있어요)</div>';
       return;
     }
 
@@ -233,7 +279,7 @@
 
     var presentCount = 0;
     var html = expected.map(function (s) {
-      var rec = todaysAttendance.find(function (a) { return a.student_id === s.id; });
+      var rec = attendance.find(function (a) { return a.student_id === s.id; });
       if (rec) presentCount++;
       return '<div class="item' + (rec ? '' : ' absent') + '">' +
         '<div class="left"><div class="name">' + escapeHtml(s.student_name) + '</div>' +
@@ -244,7 +290,8 @@
         '</div></div>';
     }).join('');
 
-    list.innerHTML = '<div class="group-label">' + DAY_LABELS[wKey] + '요일 명단 — ' + presentCount + ' / ' + expected.length + '명 출석</div>' + html;
+    var label = DAY_LABELS[wKey] + '요일 (' + dateLabel + (isToday ? ' · 오늘' : '') + ') — ' + presentCount + ' / ' + expected.length + '명 출석';
+    list.innerHTML = '<div class="group-label">' + label + '</div>' + html;
   }
 
   function renderAll() {
