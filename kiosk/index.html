@@ -44,6 +44,9 @@
     padding: 18px 28px;
   }
   .date-badge { font-size: 20px; color: var(--muted); font-weight: 600; }
+  .sync-badge { font-size: 13px; font-weight: 700; margin-top: 4px; }
+  .sync-badge.ok { color: var(--success); }
+  .sync-badge.err { color: var(--danger); }
   .clinic-title { font-size: 26px; font-weight: 800; color: var(--primary-dark); letter-spacing: -0.5px; }
   .gear-btn {
     min-width: 90px; height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid #c3c9db; background: #eef1fa;
@@ -160,6 +163,7 @@
       <div>
         <div class="clinic-title">📋 클리닉 출석 체크</div>
         <div class="date-badge" id="todayLabel"></div>
+        <div class="sync-badge" id="syncBadge"></div>
       </div>
       <button class="gear-btn" id="openAdminBtn" title="관리자">⚙ 관리자</button>
     </div>
@@ -737,8 +741,17 @@
   }
 
   // ---------------- CLOUD SYNC (Supabase) ----------------
+  function setSyncBadge(ok, text) {
+    var el = document.getElementById('syncBadge');
+    if (!el) return;
+    el.className = 'sync-badge ' + (ok ? 'ok' : 'err');
+    el.textContent = text;
+  }
+
   function syncAttendanceToCloud(student, wKey, timeStr) {
     if (!state.sbUrl || !state.sbKey) return;
+    var now = new Date();
+    var hhmm = ('0'+now.getHours()).slice(-2) + ':' + ('0'+now.getMinutes()).slice(-2);
     fetch(state.sbUrl.replace(/\/+$/, '') + '/rest/v1/clinic_attendance', {
       method: 'POST',
       headers: {
@@ -755,7 +768,12 @@
         time_slot: student.time || null,
         checked_in_at: new Date().toISOString()
       })
-    }).catch(function () { /* offline or network error: local record is still safe */ });
+    }).then(function (res) {
+      if (!res.ok) { setSyncBadge(false, '☁ 폰 전송 실패 (' + hhmm + ')'); return; }
+      setSyncBadge(true, '☁ 폰 전송 완료 (' + hhmm + ')');
+    }).catch(function () {
+      setSyncBadge(false, '☁ 인터넷 연결 확인 필요 (' + hhmm + ')');
+    });
   }
 
   function syncRosterToCloud() {
