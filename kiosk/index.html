@@ -799,7 +799,7 @@
         'Prefer': 'return=minimal'
       },
       body: JSON.stringify({
-        student_id: student.id,
+        student_id: student.phone + '-' + (student.weekStart || 'none'),
         student_name: student.name,
         class_name: student.cls || null,
         day_label: DAY_LABELS[wKey],
@@ -835,7 +835,7 @@
         if (!res.ok) return res.text().then(function (t) { throw new Error(t); });
         if (state.students.length === 0) return;
         var rows = state.students.map(function (s) {
-          return { id: s.id, student_name: s.name, class_name: s.cls || null, time_slot: s.time || null, days: s.days, week_start: s.weekStart || null };
+          return { id: s.phone + '-' + (s.weekStart || 'none'), student_name: s.name, class_name: s.cls || null, time_slot: s.time || null, days: s.days, week_start: s.weekStart || null };
         });
         return fetch(base + '/rest/v1/clinic_students', { method: 'POST', headers: headers, body: JSON.stringify(rows) })
           .then(function (res2) {
