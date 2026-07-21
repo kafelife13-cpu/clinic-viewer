@@ -197,6 +197,12 @@
     return d.getFullYear() + '-' + ('0'+(d.getMonth()+1)).slice(-2) + '-' + ('0'+d.getDate()).slice(-2);
   }
 
+  // checked_in_at is stored as UTC ISO; compare using the viewer's local calendar date,
+  // not the raw UTC date string (which would be off by one during KST midnight-9am).
+  function localDateStr(isoString) {
+    return dateStr(new Date(isoString));
+  }
+
   function mondayOf(d) {
     var day = d.getDay();
     var diff = day === 0 ? -6 : 1 - day;
@@ -276,7 +282,7 @@
     var isToday = wKey === todayDayKey();
     var dateLabel = (targetDate.getMonth()+1) + '월 ' + targetDate.getDate() + '일';
     var targetWeek = mondayStr(targetDate);
-    var attendance = lastRows.filter(function (r) { return (r.checked_in_at || '').slice(0,10) === t; });
+    var attendance = lastRows.filter(function (r) { return r.checked_in_at && localDateStr(r.checked_in_at) === t; });
     var expected = lastStudents.filter(function (s) { return (s.days || []).indexOf(wKey) !== -1 && (!s.week_start || s.week_start === targetWeek); });
 
     if (expected.length === 0) {
