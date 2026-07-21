@@ -46,8 +46,8 @@
   .date-badge { font-size: 20px; color: var(--muted); font-weight: 600; }
   .clinic-title { font-size: 26px; font-weight: 800; color: var(--primary-dark); letter-spacing: -0.5px; }
   .gear-btn {
-    width: 44px; height: 44px; border-radius: 50%; border: none; background: transparent;
-    color: var(--border); font-size: 22px; cursor: pointer;
+    min-width: 90px; height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid #c3c9db; background: #eef1fa;
+    color: #4a5578; font-size: 16px; font-weight: 700; cursor: pointer;
   }
   .gear-btn:active { background: #e9ecf5; }
 
@@ -143,7 +143,7 @@
   .row-del { color: var(--danger); background: none; border: none; cursor: pointer; font-size: 18px; }
 
   .pin-gate {
-    position: fixed; inset: 0; background: rgba(20,26,45,0.55); display: flex; align-items: center; justify-content: center; z-index: 50;
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0; inset: 0; background: rgba(20,26,45,0.55); display: flex; align-items: center; justify-content: center; z-index: 50;
   }
   .pin-box { background: #fff; border-radius: 16px; padding: 28px 30px; width: 300px; text-align: center; }
   .pin-box h3 { margin: 0 0 14px; font-size: 17px; }
@@ -161,7 +161,7 @@
         <div class="clinic-title">📋 클리닉 출석 체크</div>
         <div class="date-badge" id="todayLabel"></div>
       </div>
-      <button class="gear-btn" id="openAdminBtn" title="관리자">⚙</button>
+      <button class="gear-btn" id="openAdminBtn" title="관리자">⚙ 관리자</button>
     </div>
 
     <div class="phone-display placeholder" id="phoneDisplay">전화번호 뒷자리 4자리</div>
