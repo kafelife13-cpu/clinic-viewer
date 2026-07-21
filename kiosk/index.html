@@ -849,6 +849,7 @@
         saveData();
         renderStudentTable();
         refreshAttendancePanel();
+        syncRosterToCloud();
         alert('백업 데이터를 불러왔습니다.');
       } catch (e) {
         alert('올바른 백업 파일이 아닙니다.');
