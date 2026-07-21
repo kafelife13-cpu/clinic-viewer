@@ -76,8 +76,8 @@
 
   /* ---------- Result overlay ---------- */
   #result {
-    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
-    flex-direction: column; text-align: center; padding: 40px;
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0; inset: 0; display: none; align-items: center; justify-content: center;
+    flex-direction: column; text-align: center; padding: 40px; z-index: 20;
   }
   #result.show { display: flex; }
   #result.ok { background: rgba(31,169,113,0.97); color: #fff; }
@@ -327,6 +327,16 @@
 <script>
 (function () {
   "use strict";
+
+  // Polyfill for very old browsers (e.g. old Android tablets) that predate Array.prototype.find
+  if (!Array.prototype.find) {
+    Array.prototype.find = function (predicate) {
+      for (var i = 0; i < this.length; i++) {
+        if (predicate(this[i], i, this)) return this[i];
+      }
+      return undefined;
+    };
+  }
 
   var DAY_KEYS = ['sun','mon','tue','wed','thu','fri','sat'];
   var DAY_LABELS = {sun:'일', mon:'월', tue:'화', wed:'수', thu:'목', fri:'금', sat:'토'};
