@@ -291,6 +291,14 @@
           <div class="muted-small" id="sbRosterStatus">명단을 추가/수정/삭제하면 자동으로 동기화되지만, 안 될 때 이 버튼으로 수동 동기화할 수 있어요.</div>
         </div>
         <div class="card">
+          <h2>출석 전송 기록 (최근 30건)</h2>
+          <div class="muted-small" style="margin-bottom:8px;">체크인할 때마다 폰으로 전송이 성공/실패했는지 여기 남습니다.</div>
+          <table>
+            <thead><tr><th>시각</th><th>학생</th><th>결과</th><th>상세</th></tr></thead>
+            <tbody id="syncLogBody"></tbody>
+          </table>
+        </div>
+        <div class="card">
           <h2>관리자 PIN 변경</h2>
           <div class="form-row">
             <input type="password" id="newPin" placeholder="새 4자리 PIN" maxlength="8">
@@ -532,6 +540,27 @@
     refreshAttendancePanel();
     document.getElementById('sbUrl').value = state.sbUrl;
     document.getElementById('sbKey').value = state.sbKey;
+    renderSyncLog();
+  }
+
+  function renderSyncLog() {
+    var body = document.getElementById('syncLogBody');
+    if (!body) return;
+    var log = state.syncLog || [];
+    if (log.length === 0) {
+      body.innerHTML = '<tr><td colspan="4" style="color:var(--muted)">아직 기록 없음</td></tr>';
+      return;
+    }
+    body.innerHTML = log.map(function (e) {
+      var t = new Date(e.at);
+      var timeStr = ('0'+t.getHours()).slice(-2) + ':' + ('0'+t.getMinutes()).slice(-2) + ':' + ('0'+t.getSeconds()).slice(-2);
+      return '<tr>' +
+        '<td>' + timeStr + '</td>' +
+        '<td>' + escapeHtml(e.student || '') + '</td>' +
+        '<td>' + (e.ok ? '<span class="pill pill-ok">성공</span>' : '<span class="pill pill-no">실패(' + e.status + ')</span>') + '</td>' +
+        '<td style="font-size:11px; color:var(--muted); word-break:break-all;">' + escapeHtml(e.detail || '') + '</td>' +
+        '</tr>';
+    }).join('');
   }
   document.getElementById('exitAdminBtn').addEventListener('click', function () {
     adminOpen = false;
@@ -748,11 +777,20 @@
     el.textContent = text;
   }
 
+  function logSync(entry) {
+    if (!state.syncLog) state.syncLog = [];
+    entry.at = new Date().toISOString();
+    state.syncLog.unshift(entry);
+    if (state.syncLog.length > 30) state.syncLog.length = 30;
+    saveData();
+  }
+
   function syncAttendanceToCloud(student, wKey, timeStr) {
     if (!state.sbUrl || !state.sbKey) return;
     var now = new Date();
     var hhmm = ('0'+now.getHours()).slice(-2) + ':' + ('0'+now.getMinutes()).slice(-2);
-    fetch(state.sbUrl.replace(/\/+$/, '') + '/rest/v1/clinic_attendance', {
+    var url = state.sbUrl.replace(/\/+$/, '') + '/rest/v1/clinic_attendance';
+    fetch(url, {
       method: 'POST',
       headers: {
         'apikey': state.sbKey,
@@ -769,10 +807,17 @@
         checked_in_at: new Date().toISOString()
       })
     }).then(function (res) {
-      if (!res.ok) { setSyncBadge(false, '☁ 폰 전송 실패 (' + hhmm + ')'); return; }
+      if (!res.ok) {
+        return res.text().then(function (t) {
+          setSyncBadge(false, '☁ 폰 전송 실패 (' + hhmm + ')');
+          logSync({ student: student.name, ok: false, status: res.status, detail: t.slice(0, 300) });
+        });
+      }
       setSyncBadge(true, '☁ 폰 전송 완료 (' + hhmm + ')');
-    }).catch(function () {
+      logSync({ student: student.name, ok: true, status: res.status });
+    }).catch(function (err) {
       setSyncBadge(false, '☁ 인터넷 연결 확인 필요 (' + hhmm + ')');
+      logSync({ student: student.name, ok: false, status: 0, detail: (err && err.message) ? err.message : String(err) });
     });
   }
 
