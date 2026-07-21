@@ -197,6 +197,13 @@
     return d.getFullYear() + '-' + ('0'+(d.getMonth()+1)).slice(-2) + '-' + ('0'+d.getDate()).slice(-2);
   }
 
+  function mondayOf(d) {
+    var day = d.getDay();
+    var diff = day === 0 ? -6 : 1 - day;
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate() + diff);
+  }
+  function mondayStr(d) { return dateStr(mondayOf(d)); }
+
   // Resolves the selected weekday to a concrete date within the current Sun–Sat week.
   function dateForDayKey(dayKey) {
     var now = new Date();
@@ -268,8 +275,9 @@
     var t = dateStr(targetDate);
     var isToday = wKey === todayDayKey();
     var dateLabel = (targetDate.getMonth()+1) + '월 ' + targetDate.getDate() + '일';
+    var targetWeek = mondayStr(targetDate);
     var attendance = lastRows.filter(function (r) { return (r.checked_in_at || '').slice(0,10) === t; });
-    var expected = lastStudents.filter(function (s) { return (s.days || []).indexOf(wKey) !== -1; });
+    var expected = lastStudents.filter(function (s) { return (s.days || []).indexOf(wKey) !== -1 && (!s.week_start || s.week_start === targetWeek); });
 
     if (expected.length === 0) {
       list.innerHTML = '<div class="empty">' + DAY_LABELS[wKey] + '요일 등록된 클리닉 학생이 없습니다.<br>(명단이 아직 동기화되지 않았을 수도 있어요)</div>';

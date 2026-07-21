@@ -212,6 +212,7 @@
             <input type="tel" id="newPhone" placeholder="전화번호 뒷자리 4자리 (예: 9534)" maxlength="4" inputmode="numeric">
             <input type="text" id="newClass" placeholder="반 (예: 한백고1)" style="max-width:140px;">
             <input type="text" id="newTime" placeholder="시간(선택, 예: 3:30)" style="max-width:140px;">
+            <input type="text" id="newWeek" placeholder="적용 주(선택, 예: 7/20)" style="max-width:150px;">
           </div>
           <div class="form-row">
             <div class="day-checks" id="newDays"></div>
@@ -220,14 +221,20 @@
         </div>
         <div class="card">
           <h2>일괄 등록 (한 줄에 한 명씩)</h2>
-          <div class="muted-small" style="margin-bottom:8px;">형식: 이름,코드4자리,요일글자(월화수목금토일 중 해당 글자, 여러 요일이면 붙여쓰기),반,시간(선택)<br>예) 노현채,9534,수,한백고1,3:30 &nbsp;/&nbsp; 김현서,1362,수목,한백고1,3:30</div>
-          <textarea id="bulkText" rows="6" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border); font-size:14px; font-family:inherit;" placeholder="노현채,9534,수,한백고1,3:30&#10;강민호,3523,수,한백고1,3:30"></textarea>
+          <div class="muted-small" style="margin-bottom:8px;">형식: 이름,코드4자리,요일글자(월화수목금토일 중 해당 글자, 여러 요일이면 붙여쓰기),반,시간(선택),적용 주(선택, 그 주의 아무 날짜나 입력하면 자동으로 그 주 전체에 적용됩니다)<br>예) 노현채,9534,수,한백고1,3:30,7/20 &nbsp;/&nbsp; 김현서,1362,수목,한백고1,3:30,7/20<br>적용 주를 비워두면 모든 주에 항상 적용됩니다.</div>
+          <textarea id="bulkText" rows="6" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border); font-size:14px; font-family:inherit;" placeholder="노현채,9534,수,한백고1,3:30,7/20&#10;강민호,3523,수,한백고1,3:30,7/20"></textarea>
           <div style="margin-top:10px;"><button class="btn btn-primary" id="bulkAddBtn">일괄 등록 실행</button></div>
         </div>
         <div class="card">
           <h2>등록된 학생 (<span id="studentCount">0</span>명)</h2>
+          <div class="form-row">
+            <div class="day-checks" id="weekFilterChips">
+              <div class="day-chip"><input type="radio" name="weekFilter" id="wf-current" value="current" checked><label for="wf-current">이번 주</label></div>
+              <div class="day-chip"><input type="radio" name="weekFilter" id="wf-all" value="all"><label for="wf-all">전체 보기</label></div>
+            </div>
+          </div>
           <table>
-            <thead><tr><th>이름</th><th>전화번호</th><th>반</th><th>시간</th><th>클리닉 요일</th><th></th></tr></thead>
+            <thead><tr><th>이름</th><th>전화번호</th><th>반</th><th>시간</th><th>클리닉 요일</th><th>적용 주</th><th></th></tr></thead>
             <tbody id="studentTableBody"></tbody>
           </table>
         </div>
@@ -350,6 +357,45 @@
   function dayKeyOf(dateObj) { return DAY_KEYS[dateObj.getDay()]; }
   function uid() { return 'id' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 
+  // Monday-Sunday week helpers, so a roster can be scoped to "the week containing this date"
+  function mondayOf(dateObj) {
+    var day = dateObj.getDay(); // 0 Sun .. 6 Sat
+    var diff = day === 0 ? -6 : 1 - day;
+    return new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate() + diff);
+  }
+  function mondayStr(dateObj) { return todayKey(mondayOf(dateObj)); }
+  function parseWeekInput(s) {
+    s = (s || '').trim();
+    if (!s) return '';
+    var m;
+    if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) {
+      return mondayStr(new Date(+m[1], +m[2]-1, +m[3]));
+    }
+    if ((m = s.match(/^(\d{1,2})[\/.](\d{1,2})$/))) {
+      return mondayStr(new Date(new Date().getFullYear(), +m[1]-1, +m[2]));
+    }
+    return '';
+  }
+  function weekLabel(weekStart) {
+    if (!weekStart) return '상시';
+    var parts = weekStart.split('-').map(Number);
+    var m = new Date(parts[0], parts[1]-1, parts[2]);
+    return (m.getMonth()+1) + '/' + m.getDate() + '주~';
+  }
+
+  // When a phone code has entries from multiple weeks, prefer the one matching the current week.
+  function findActiveStudent(phoneVal) {
+    var candidates = state.students.filter(function (s) { return s.phone === phoneVal; });
+    if (candidates.length === 0) return null;
+    if (candidates.length === 1) return candidates[0];
+    var curWeek = mondayStr(new Date());
+    var wKey = dayKeyOf(new Date());
+    var best = candidates.find(function (s) { return (!s.weekStart || s.weekStart === curWeek) && s.days.indexOf(wKey) !== -1; });
+    if (best) return best;
+    best = candidates.find(function (s) { return !s.weekStart || s.weekStart === curWeek; });
+    return best || candidates[candidates.length - 1];
+  }
+
   // ---------------- KIOSK ----------------
   var phone = '';
   var phoneDisplay = document.getElementById('phoneDisplay');
@@ -405,7 +451,7 @@
       showResult('err', '⚠️', '', '전화번호 뒷자리 4자리를 입력해주세요');
       return;
     }
-    var student = state.students.find(function (s) { return s.phone === d; });
+    var student = findActiveStudent(d);
     if (!student) {
       showResult('err', '❓', '', '등록되지 않은 번호입니다\n관리자에게 문의해주세요');
       return;
@@ -502,8 +548,9 @@
   }
   buildDayChecks(document.getElementById('newDays'), 'newday');
 
-  function upsertStudent(name, phoneVal, days, classVal, timeVal) {
-    var existing = state.students.find(function (s) { return s.phone === phoneVal; });
+  function upsertStudent(name, phoneVal, days, classVal, timeVal, weekStart) {
+    weekStart = weekStart || '';
+    var existing = state.students.find(function (s) { return s.phone === phoneVal && (s.weekStart||'') === weekStart; });
     if (existing) {
       days.forEach(function (d) { if (existing.days.indexOf(d) === -1) existing.days.push(d); });
       if (timeVal) {
@@ -513,7 +560,7 @@
       if (classVal) existing.cls = classVal;
       if (name) existing.name = name;
     } else {
-      state.students.push({ id: uid(), name: name, phone: phoneVal, days: days, cls: classVal || '', time: timeVal || '' });
+      state.students.push({ id: uid(), name: name, phone: phoneVal, days: days, cls: classVal || '', time: timeVal || '', weekStart: weekStart });
     }
     saveData();
   }
@@ -523,6 +570,7 @@
     var phoneVal = digitsOnly(document.getElementById('newPhone').value);
     var classVal = document.getElementById('newClass').value.trim();
     var timeVal = document.getElementById('newTime').value.trim();
+    var weekStart = parseWeekInput(document.getElementById('newWeek').value);
     var days = Array.prototype.slice.call(document.querySelectorAll('#newDays input:checked')).map(function (c) { return c.value; });
     if (!name || phoneVal.length !== 4) {
       alert('이름과 전화번호 뒷자리 4자리를 정확히 입력해주세요.');
@@ -532,11 +580,12 @@
       alert('클리닉 요일을 하나 이상 선택해주세요.');
       return;
     }
-    upsertStudent(name, phoneVal, days, classVal, timeVal);
+    upsertStudent(name, phoneVal, days, classVal, timeVal, weekStart);
     document.getElementById('newName').value = '';
     document.getElementById('newPhone').value = '';
     document.getElementById('newClass').value = '';
     document.getElementById('newTime').value = '';
+    document.getElementById('newWeek').value = '';
     document.querySelectorAll('#newDays input:checked').forEach(function (c) { c.checked = false; });
     renderStudentTable();
     syncRosterToCloud();
@@ -548,7 +597,7 @@
     var okCount = 0, failLines = [];
     lines.forEach(function (line) {
       var parts = line.split(',').map(function (p) { return p.trim(); });
-      var name = parts[0], code = digitsOnly(parts[1] || ''), dayStr = parts[2] || '', classVal = parts[3] || '', timeVal = parts[4] || '';
+      var name = parts[0], code = digitsOnly(parts[1] || ''), dayStr = parts[2] || '', classVal = parts[3] || '', timeVal = parts[4] || '', weekVal = parseWeekInput(parts[5] || '');
       var days = [];
       for (var i = 0; i < dayStr.length; i++) {
         var ch = dayStr[i];
@@ -559,7 +608,7 @@
         failLines.push(line);
         return;
       }
-      upsertStudent(name, code, days, classVal, timeVal);
+      upsertStudent(name, code, days, classVal, timeVal, weekVal);
       okCount++;
     });
     renderStudentTable();
@@ -570,11 +619,18 @@
     document.getElementById('bulkText').value = '';
   });
 
+  document.querySelectorAll('input[name="weekFilter"]').forEach(function (r) {
+    r.addEventListener('change', renderStudentTable);
+  });
+
   function renderStudentTable() {
     var tbody = document.getElementById('studentTableBody');
     tbody.innerHTML = '';
-    document.getElementById('studentCount').textContent = state.students.length;
-    state.students.slice().sort(function(a,b){
+    var showAll = document.getElementById('wf-all').checked;
+    var curWeek = mondayStr(new Date());
+    var visible = showAll ? state.students : state.students.filter(function (s) { return !s.weekStart || s.weekStart === curWeek; });
+    document.getElementById('studentCount').textContent = visible.length + (showAll ? '' : ' / 전체 ' + state.students.length);
+    visible.slice().sort(function(a,b){
       var c = (a.cls||'').localeCompare(b.cls||'');
       if (c !== 0) return c;
       return a.name.localeCompare(b.name, 'ko');
@@ -587,6 +643,7 @@
         '<td>' + (s.cls ? escapeHtml(s.cls) : '-') + '</td>' +
         '<td>' + (s.time ? escapeHtml(s.time) : '-') + '</td>' +
         '<td class="day-badges">' + (badges || '<span style="opacity:.5">-</span>') + '</td>' +
+        '<td>' + weekLabel(s.weekStart) + '</td>' +
         '<td><button class="row-del" data-id="' + s.id + '">🗑</button></td>';
       tbody.appendChild(tr);
     });
@@ -622,8 +679,9 @@
     var wKey = dayKeyOf(dateObj);
     document.getElementById('attDayLabel').textContent = DAY_LABELS[wKey] + '요일';
 
+    var selWeek = mondayStr(dateObj);
     var dayAttendance = state.attendance.filter(function (a) { return a.date === dateVal; });
-    var expected = state.students.filter(function (s) { return s.days.indexOf(wKey) !== -1; });
+    var expected = state.students.filter(function (s) { return s.days.indexOf(wKey) !== -1 && (!s.weekStart || s.weekStart === selWeek); });
 
     var tbody = document.getElementById('attTableBody');
     tbody.innerHTML = '';
@@ -703,7 +761,7 @@
       .then(function () {
         if (state.students.length === 0) return;
         var rows = state.students.map(function (s) {
-          return { id: s.id, student_name: s.name, class_name: s.cls || null, time_slot: s.time || null, days: s.days };
+          return { id: s.id, student_name: s.name, class_name: s.cls || null, time_slot: s.time || null, days: s.days, week_start: s.weekStart || null };
         });
         return fetch(base + '/rest/v1/clinic_students', { method: 'POST', headers: headers, body: JSON.stringify(rows) });
       })
