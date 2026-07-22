@@ -497,9 +497,10 @@
 
     var timeStr = ('0'+now.getHours()).slice(-2) + ':' + ('0'+now.getMinutes()).slice(-2);
     var attId = uid();
-    state.attendance.push({ id: attId, studentId: student.id, date: dKey, day: wKey, time: timeStr, synced: false });
+    var isoNow = now.toISOString();
+    state.attendance.push({ id: attId, studentId: student.id, date: dKey, day: wKey, time: timeStr, iso: isoNow, synced: false });
     saveData();
-    syncAttendanceToCloud(student, wKey, timeStr, attId);
+    syncAttendanceToCloud(student, wKey, timeStr, attId, isoNow);
 
     var scheduled = student.days.indexOf(wKey) !== -1;
     if (scheduled) {
@@ -802,9 +803,12 @@
       var now = new Date();
       var timeStr = ('0'+now.getHours()).slice(-2) + ':' + ('0'+now.getMinutes()).slice(-2);
       var attId = uid();
-      state.attendance.push({ id: attId, studentId: studentId, date: dateVal, day: wKey, time: timeStr, manual: true, synced: false });
+      var dp = dateVal.split('-').map(Number);
+      var when = new Date(dp[0], dp[1]-1, dp[2], now.getHours(), now.getMinutes(), now.getSeconds());
+      var isoWhen = when.toISOString();
+      state.attendance.push({ id: attId, studentId: studentId, date: dateVal, day: wKey, time: timeStr, manual: true, iso: isoWhen, synced: false });
       saveData();
-      syncAttendanceToCloud(student, wKey, timeStr, attId);
+      syncAttendanceToCloud(student, wKey, timeStr, attId, isoWhen);
     }
     refreshAttendancePanel();
   }
@@ -854,7 +858,7 @@
     if (rec) { rec.synced = true; saveData(); }
   }
 
-  function syncAttendanceToCloud(student, wKey, timeStr, attId) {
+  function syncAttendanceToCloud(student, wKey, timeStr, attId, isoWhen) {
     if (!state.sbUrl || !state.sbKey) return;
     var now = new Date();
     var hhmm = ('0'+now.getHours()).slice(-2) + ':' + ('0'+now.getMinutes()).slice(-2);
@@ -873,7 +877,7 @@
         class_name: student.cls || null,
         day_label: DAY_LABELS[wKey],
         time_slot: student.time || null,
-        checked_in_at: new Date().toISOString()
+        checked_in_at: isoWhen || new Date().toISOString()
       })
     }).then(function (res) {
       if (!res.ok) {
@@ -905,7 +909,13 @@
     var results = pending.map(function (a) {
       var student = state.students.find(function (s) { return s.id === a.studentId; });
       if (!student) return Promise.resolve(false);
-      return syncAttendanceToCloud(student, a.day, a.time, a.id);
+      var isoWhen = a.iso;
+      if (!isoWhen) {
+        var dp = a.date.split('-').map(Number);
+        var tp = (a.time || '00:00').split(':').map(Number);
+        isoWhen = new Date(dp[0], dp[1]-1, dp[2], tp[0]||0, tp[1]||0).toISOString();
+      }
+      return syncAttendanceToCloud(student, a.day, a.time, a.id, isoWhen);
     });
     Promise.all(results).then(function (oks) {
       var successCount = oks.filter(function (x) { return x; }).length;
