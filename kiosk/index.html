@@ -165,7 +165,10 @@
         <div class="date-badge" id="todayLabel"></div>
         <div class="sync-badge" id="syncBadge"></div>
       </div>
-      <button class="gear-btn" id="openAdminBtn" title="관리자">⚙ 관리자</button>
+      <div style="display:flex; gap:8px;">
+        <button class="gear-btn" id="refreshBtn" title="새로고침">🔄 새로고침</button>
+        <button class="gear-btn" id="openAdminBtn" title="관리자">⚙ 관리자</button>
+      </div>
     </div>
 
     <div class="phone-display placeholder" id="phoneDisplay">전화번호 뒷자리 4자리</div>
@@ -518,6 +521,10 @@
     pinInput.value = '';
     pinGate.style.display = 'flex';
     setTimeout(function(){ pinInput.focus(); }, 50);
+  });
+
+  document.getElementById('refreshBtn').addEventListener('click', function () {
+    location.href = location.pathname + '?t=' + Date.now();
   });
   document.getElementById('pinCancel').addEventListener('click', function () {
     pinGate.style.display = 'none';

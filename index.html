@@ -123,7 +123,10 @@
       <h1>📋 클리닉 출석 현황</h1>
       <div class="sub" id="lastUpdated">불러오는 중...</div>
     </div>
-    <button class="gear-btn" id="settingsBtn">⚙</button>
+    <div style="display:flex; gap:8px;">
+      <button class="gear-btn" id="refreshBtn" title="새로고침">🔄</button>
+      <button class="gear-btn" id="settingsBtn">⚙</button>
+    </div>
   </div>
   <div class="container">
     <div class="status-row"><span class="dot" id="statusDot"></span><span id="statusText">실시간 연결됨 (10초마다 갱신)</span></div>
@@ -184,6 +187,10 @@
       document.getElementById('setupKey').value = '';
       showSetup();
     }
+  });
+
+  document.getElementById('refreshBtn').addEventListener('click', function () {
+    location.href = location.pathname + '?t=' + Date.now();
   });
 
   var DAY_KEYS = ['sun','mon','tue','wed','thu','fri','sat'];
