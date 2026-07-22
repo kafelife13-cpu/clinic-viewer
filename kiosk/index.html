@@ -256,7 +256,7 @@
         <div class="card">
           <h2>이날 클리닉 명단 출석 현황</h2>
           <table>
-            <thead><tr><th>이름</th><th>전화번호</th><th>반</th><th>시간</th><th>상태</th><th>체크인 시각</th></tr></thead>
+            <thead><tr><th>이름</th><th>전화번호</th><th>반</th><th>시간</th><th>상태</th><th>체크인 시각</th><th></th></tr></thead>
             <tbody id="attTableBody"></tbody>
           </table>
         </div>
@@ -743,12 +743,18 @@
         '<td>' + (s.cls ? escapeHtml(s.cls) : '-') + '</td>' +
         '<td>' + (s.time ? escapeHtml(s.time) : '-') + '</td>' +
         '<td>' + (rec ? '<span class="pill pill-ok">출석</span>' : '<span class="pill pill-no">미출석</span>') + '</td>' +
-        '<td>' + (rec ? rec.time : '-') + '</td>';
+        '<td>' + (rec ? rec.time : '-') + '</td>' +
+        '<td><button class="btn btn-ghost att-toggle-btn" data-student-id="' + s.id + '" data-date="' + dateVal + '" data-day="' + wKey + '" style="font-size:12px; padding:6px 10px;">' + (rec ? '출석 취소' : '출석 처리') + '</button></td>';
       tbody.appendChild(tr);
     });
     if (expected.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted)">이 요일에 등록된 클리닉 학생이 없습니다.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted)">이 요일에 등록된 클리닉 학생이 없습니다.</td></tr>';
     }
+    tbody.querySelectorAll('.att-toggle-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        toggleAttendance(btn.getAttribute('data-student-id'), btn.getAttribute('data-date'), btn.getAttribute('data-day'));
+      });
+    });
 
     var expectedIds = expected.map(function (s) { return s.id; });
     var extra = dayAttendance.filter(function (a) { return expectedIds.indexOf(a.studentId) === -1; });
@@ -769,6 +775,27 @@
     }
   }
 
+  function toggleAttendance(studentId, dateVal, wKey) {
+    var student = state.students.find(function (s) { return s.id === studentId; });
+    if (!student) return;
+    var existingIdx = -1;
+    for (var i = 0; i < state.attendance.length; i++) {
+      if (state.attendance[i].studentId === studentId && state.attendance[i].date === dateVal) { existingIdx = i; break; }
+    }
+    if (existingIdx !== -1) {
+      state.attendance.splice(existingIdx, 1);
+      saveData();
+      deleteAttendanceFromCloud(student, dateVal);
+    } else {
+      var now = new Date();
+      var timeStr = ('0'+now.getHours()).slice(-2) + ':' + ('0'+now.getMinutes()).slice(-2);
+      state.attendance.push({ id: uid(), studentId: studentId, date: dateVal, day: wKey, time: timeStr, manual: true });
+      saveData();
+      syncAttendanceToCloud(student, wKey, timeStr);
+    }
+    refreshAttendancePanel();
+  }
+
   // ---------------- CLOUD SYNC (Supabase) ----------------
   function setSyncBadge(ok, text) {
     var el = document.getElementById('syncBadge');
@@ -783,6 +810,29 @@
     state.syncLog.unshift(entry);
     if (state.syncLog.length > 30) state.syncLog.length = 30;
     saveData();
+  }
+
+  function utcRangeForLocalDate(dateVal) {
+    var parts = dateVal.split('-').map(Number);
+    var start = new Date(parts[0], parts[1]-1, parts[2], 0, 0, 0);
+    var end = new Date(parts[0], parts[1]-1, parts[2]+1, 0, 0, 0);
+    return { start: start.toISOString(), end: end.toISOString() };
+  }
+
+  function deleteAttendanceFromCloud(student, dateVal) {
+    if (!state.sbUrl || !state.sbKey) return;
+    var range = utcRangeForLocalDate(dateVal);
+    var sid = student.phone + '-' + (student.weekStart || 'none');
+    var url = state.sbUrl.replace(/\/+$/, '') + '/rest/v1/clinic_attendance?student_id=eq.' + encodeURIComponent(sid) +
+      '&checked_in_at=gte.' + encodeURIComponent(range.start) + '&checked_in_at=lt.' + encodeURIComponent(range.end);
+    fetch(url, {
+      method: 'DELETE',
+      headers: { 'apikey': state.sbKey, 'Authorization': 'Bearer ' + state.sbKey }
+    }).then(function (res) {
+      logSync({ student: student.name, ok: res.ok, status: res.status, detail: res.ok ? '출석 취소됨' : '취소 실패' });
+    }).catch(function (err) {
+      logSync({ student: student.name, ok: false, status: 0, detail: '취소 중 오류: ' + ((err && err.message) || err) });
+    });
   }
 
   function syncAttendanceToCloud(student, wKey, timeStr) {
