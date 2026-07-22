@@ -323,7 +323,11 @@
         </div>
         <div class="card">
           <h2>초기화</h2>
-          <button class="btn btn-danger" id="resetBtn">모든 데이터 삭제</button>
+          <div class="form-row">
+            <button class="btn btn-danger" id="resetAttBtn">출석 기록만 삭제</button>
+            <button class="btn btn-danger" id="resetBtn">모든 데이터 삭제</button>
+          </div>
+          <div class="muted-small">"출석 기록만 삭제"는 학생 명단은 남기고 체크인 기록(로컬+폰)만 지웁니다.</div>
         </div>
       </div>
     </div>
@@ -1050,6 +1054,23 @@
       saveData();
       renderStudentTable();
       refreshAttendancePanel();
+    }
+  });
+
+  document.getElementById('resetAttBtn').addEventListener('click', function () {
+    if (!confirm('출석 기록(체크인 로그)만 전부 삭제합니다. 학생 명단은 유지됩니다. 계속하시겠습니까?')) return;
+    state.attendance = [];
+    saveData();
+    refreshAttendancePanel();
+    if (state.sbUrl && state.sbKey) {
+      var url = state.sbUrl.replace(/\/+$/, '') + '/rest/v1/clinic_attendance?id=gte.0';
+      fetch(url, {
+        method: 'DELETE',
+        headers: { 'apikey': state.sbKey, 'Authorization': 'Bearer ' + state.sbKey }
+      }).then(function () { alert('출석 기록을 삭제했습니다 (폰 쪽도 정리됨).'); })
+        .catch(function () { alert('로컬 기록은 지워졌지만, 폰(클라우드) 쪽 삭제는 실패했어요. 인터넷 연결을 확인해주세요.'); });
+    } else {
+      alert('출석 기록을 삭제했습니다.');
     }
   });
 
