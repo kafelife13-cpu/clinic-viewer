@@ -293,6 +293,10 @@
         <div class="card">
           <h2>출석 전송 기록 (최근 30건)</h2>
           <div class="muted-small" style="margin-bottom:8px;">체크인할 때마다 폰으로 전송이 성공/실패했는지 여기 남습니다.</div>
+          <div class="form-row">
+            <button class="btn btn-ghost" id="sbRetryBtn">🔁 실패한 기록 재전송</button>
+          </div>
+          <div class="muted-small" id="sbRetryStatus" style="margin-bottom:10px;"></div>
           <table>
             <thead><tr><th>시각</th><th>학생</th><th>결과</th><th>상세</th></tr></thead>
             <tbody id="syncLogBody"></tbody>
@@ -489,9 +493,10 @@
     }
 
     var timeStr = ('0'+now.getHours()).slice(-2) + ':' + ('0'+now.getMinutes()).slice(-2);
-    state.attendance.push({ id: uid(), studentId: student.id, date: dKey, day: wKey, time: timeStr });
+    var attId = uid();
+    state.attendance.push({ id: attId, studentId: student.id, date: dKey, day: wKey, time: timeStr, synced: false });
     saveData();
-    syncAttendanceToCloud(student, wKey, timeStr);
+    syncAttendanceToCloud(student, wKey, timeStr, attId);
 
     var scheduled = student.days.indexOf(wKey) !== -1;
     if (scheduled) {
@@ -789,9 +794,10 @@
     } else {
       var now = new Date();
       var timeStr = ('0'+now.getHours()).slice(-2) + ':' + ('0'+now.getMinutes()).slice(-2);
-      state.attendance.push({ id: uid(), studentId: studentId, date: dateVal, day: wKey, time: timeStr, manual: true });
+      var attId = uid();
+      state.attendance.push({ id: attId, studentId: studentId, date: dateVal, day: wKey, time: timeStr, manual: true, synced: false });
       saveData();
-      syncAttendanceToCloud(student, wKey, timeStr);
+      syncAttendanceToCloud(student, wKey, timeStr, attId);
     }
     refreshAttendancePanel();
   }
@@ -835,12 +841,18 @@
     });
   }
 
-  function syncAttendanceToCloud(student, wKey, timeStr) {
+  function markAttendanceSynced(attId) {
+    if (!attId) return;
+    var rec = state.attendance.find(function (a) { return a.id === attId; });
+    if (rec) { rec.synced = true; saveData(); }
+  }
+
+  function syncAttendanceToCloud(student, wKey, timeStr, attId) {
     if (!state.sbUrl || !state.sbKey) return;
     var now = new Date();
     var hhmm = ('0'+now.getHours()).slice(-2) + ':' + ('0'+now.getMinutes()).slice(-2);
     var url = state.sbUrl.replace(/\/+$/, '') + '/rest/v1/clinic_attendance';
-    fetch(url, {
+    return fetch(url, {
       method: 'POST',
       headers: {
         'apikey': state.sbKey,
@@ -861,13 +873,37 @@
         return res.text().then(function (t) {
           setSyncBadge(false, '☁ 폰 전송 실패 (' + hhmm + ')');
           logSync({ student: student.name, ok: false, status: res.status, detail: t.slice(0, 300) });
+          return false;
         });
       }
       setSyncBadge(true, '☁ 폰 전송 완료 (' + hhmm + ')');
       logSync({ student: student.name, ok: true, status: res.status });
+      markAttendanceSynced(attId);
+      return true;
     }).catch(function (err) {
       setSyncBadge(false, '☁ 인터넷 연결 확인 필요 (' + hhmm + ')');
       logSync({ student: student.name, ok: false, status: 0, detail: (err && err.message) ? err.message : String(err) });
+      return false;
+    });
+  }
+
+  function retryPendingSync() {
+    var pending = state.attendance.filter(function (a) { return !a.synced; });
+    var statusEl = document.getElementById('sbRetryStatus');
+    if (pending.length === 0) {
+      if (statusEl) statusEl.textContent = '밀린 기록 없음 (전부 전송 완료)';
+      return;
+    }
+    if (statusEl) statusEl.textContent = pending.length + '건 재전송 중...';
+    var results = pending.map(function (a) {
+      var student = state.students.find(function (s) { return s.id === a.studentId; });
+      if (!student) return Promise.resolve(false);
+      return syncAttendanceToCloud(student, a.day, a.time, a.id);
+    });
+    Promise.all(results).then(function (oks) {
+      var successCount = oks.filter(function (x) { return x; }).length;
+      if (statusEl) statusEl.textContent = pending.length + '건 중 ' + successCount + '건 성공';
+      refreshAttendancePanel();
     });
   }
 
@@ -915,6 +951,8 @@
       });
     }
   });
+
+  document.getElementById('sbRetryBtn').addEventListener('click', retryPendingSync);
 
   document.getElementById('sbTestBtn').addEventListener('click', function () {
     var url = document.getElementById('sbUrl').value.trim().replace(/\/+$/, '');
