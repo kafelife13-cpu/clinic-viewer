@@ -59,6 +59,12 @@
   .day-btn.today { box-shadow: inset 0 0 0 1.5px var(--primary-dark); }
   .day-btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
 
+  .date-picker-row { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .date-picker-row input[type=date] {
+    flex: 1; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--border); background: #fff;
+    font-size: 13px; color: var(--text);
+  }
+
   .empty { text-align: center; color: var(--muted); padding: 60px 20px; font-size: 14px; }
 
   .item {
@@ -135,6 +141,10 @@
       <button class="filter-btn" data-f="all">전체 최근 기록</button>
     </div>
     <div class="day-row" id="dayRow"></div>
+    <div class="date-picker-row" id="datePickerRow">
+      <input type="date" id="specificDate">
+      <button class="filter-btn" id="clearDateBtn" style="display:none;">이번 주로 돌아가기</button>
+    </div>
     <div id="list"></div>
   </div>
 </div>
@@ -199,6 +209,7 @@
 
   function todayDayKey() { return DAY_KEYS[new Date().getDay()]; }
   var selectedDayKey = todayDayKey();
+  var explicitDate = null; // when set (via date picker), overrides the "this week's Xday" resolution
 
   function dateStr(d) {
     return d.getFullYear() + '-' + ('0'+(d.getMonth()+1)).slice(-2) + '-' + ('0'+d.getDate()).slice(-2);
@@ -233,6 +244,9 @@
     btn.setAttribute('data-day', k);
     btn.addEventListener('click', function () {
       selectedDayKey = k;
+      explicitDate = null;
+      document.getElementById('specificDate').value = '';
+      document.getElementById('clearDateBtn').style.display = 'none';
       updateDayButtons();
       render();
     });
@@ -245,14 +259,35 @@
   }
   updateDayButtons();
 
-  document.querySelectorAll('.filter-btn').forEach(function (btn) {
+  document.querySelectorAll('.filter-btn[data-f]').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      document.querySelectorAll('.filter-btn').forEach(function (b) { b.classList.remove('active'); });
+      document.querySelectorAll('.filter-btn[data-f]').forEach(function (b) { b.classList.remove('active'); });
       btn.classList.add('active');
       filter = btn.getAttribute('data-f');
       dayRow.style.display = filter === 'today' ? 'flex' : 'none';
+      document.getElementById('datePickerRow').style.display = filter === 'today' ? 'flex' : 'none';
       render();
     });
+  });
+
+  document.getElementById('specificDate').addEventListener('change', function () {
+    var v = this.value;
+    if (!v) return;
+    var parts = v.split('-').map(Number);
+    explicitDate = new Date(parts[0], parts[1]-1, parts[2]);
+    selectedDayKey = DAY_KEYS[explicitDate.getDay()];
+    updateDayButtons();
+    document.getElementById('clearDateBtn').style.display = 'inline-block';
+    render();
+  });
+
+  document.getElementById('clearDateBtn').addEventListener('click', function () {
+    explicitDate = null;
+    selectedDayKey = todayDayKey();
+    document.getElementById('specificDate').value = '';
+    this.style.display = 'none';
+    updateDayButtons();
+    render();
   });
 
   function todayStr() {
@@ -284,9 +319,9 @@
   function renderToday() {
     var list = document.getElementById('list');
     var wKey = selectedDayKey;
-    var targetDate = dateForDayKey(wKey);
+    var targetDate = explicitDate || dateForDayKey(wKey);
     var t = dateStr(targetDate);
-    var isToday = wKey === todayDayKey();
+    var isToday = t === todayStr();
     var dateLabel = (targetDate.getMonth()+1) + '월 ' + targetDate.getDate() + '일';
     var targetWeek = mondayStr(targetDate);
     var attendance = lastRows.filter(function (r) { return r.checked_in_at && localDateStr(r.checked_in_at) === t; });
