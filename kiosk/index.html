@@ -294,6 +294,21 @@
           <div class="muted-small" id="sbRosterStatus">명단을 추가/수정/삭제하면 자동으로 동기화되지만, 안 될 때 이 버튼으로 수동 동기화할 수 있어요.</div>
         </div>
         <div class="card">
+          <h2>미출석 텔레그램 알림</h2>
+          <div class="muted-small" style="margin-bottom:10px;">예정 시간에서 30분이 지나도 체크인 안 한 학생이 있으면 텔레그램으로 알려줍니다. (이 화면이 켜져있는 동안 2분마다 확인)</div>
+          <div class="form-row">
+            <input type="text" id="tgToken" placeholder="텔레그램 봇 토큰 (예: 123456:ABC-DEF...)">
+          </div>
+          <div class="form-row">
+            <input type="text" id="tgChatId" placeholder="채팅 ID (숫자)">
+          </div>
+          <div class="form-row">
+            <button class="btn btn-primary" id="tgSaveBtn">저장</button>
+            <button class="btn btn-ghost" id="tgTestBtn">테스트 메시지 보내기</button>
+          </div>
+          <div class="muted-small" id="tgStatus"></div>
+        </div>
+        <div class="card">
           <h2>출석 전송 기록 (최근 30건)</h2>
           <div class="muted-small" style="margin-bottom:8px;">체크인할 때마다 폰으로 전송이 성공/실패했는지 여기 남습니다.</div>
           <div class="form-row">
@@ -380,6 +395,9 @@
   if (!state.pin) state.pin = '0000';
   if (!state.sbUrl) state.sbUrl = '';
   if (!state.sbKey) state.sbKey = '';
+  if (!state.tgToken) state.tgToken = '';
+  if (!state.tgChatId) state.tgChatId = '';
+  if (!state.noShowAlerted) state.noShowAlerted = {};
 
   function digitsOnly(s) { return (s || '').replace(/\D/g, ''); }
   function formatPhone(d) { return d; }
@@ -557,6 +575,8 @@
     refreshAttendancePanel();
     document.getElementById('sbUrl').value = state.sbUrl;
     document.getElementById('sbKey').value = state.sbKey;
+    document.getElementById('tgToken').value = state.tgToken;
+    document.getElementById('tgChatId').value = state.tgChatId;
     renderSyncLog();
   }
 
@@ -928,6 +948,60 @@
     });
   }
 
+  // ---------------- NO-SHOW TELEGRAM ALERTS ----------------
+  function sendTelegramMessage(text) {
+    if (!state.tgToken || !state.tgChatId) return;
+    fetch('https://api.telegram.org/bot' + state.tgToken + '/sendMessage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: state.tgChatId, text: text })
+    }).catch(function () { /* best-effort; will just try again next tick if still unsent */ });
+  }
+
+  // Reads only the START of a time range like "5-7시", "3:30-5:30", "3시30분-5시30분", "5-7시/7-9시".
+  // Clinic hours are always afternoon/evening, so 1-9 is treated as PM.
+  function parseStartTime(timeStr) {
+    if (!timeStr) return null;
+    var first = timeStr.split('/')[0].split('-')[0].trim();
+    first = first.replace(/시\s*/, ':').replace(/분/, '').replace(/\s+/g, '');
+    if (!first) return null;
+    var parts = first.split(':');
+    var hour = parseInt(parts[0], 10);
+    var minute = parts[1] ? parseInt(parts[1], 10) : 0;
+    if (isNaN(hour)) return null;
+    if (hour >= 1 && hour <= 9) hour += 12;
+    return { hour: hour, minute: isNaN(minute) ? 0 : minute };
+  }
+
+  function checkNoShows() {
+    if (!state.tgToken || !state.tgChatId) return;
+    var now = new Date();
+    var dKey = todayKey(now);
+    var wKey = dayKeyOf(now);
+    var curWeek = mondayStr(now);
+    var expected = state.students.filter(function (s) {
+      return s.days.indexOf(wKey) !== -1 && (!s.weekStart || s.weekStart === curWeek);
+    });
+    var changed = false;
+    expected.forEach(function (s) {
+      var already = state.attendance.find(function (a) { return a.studentId === s.id && a.date === dKey; });
+      if (already) return;
+      var start = parseStartTime(s.time);
+      if (!start) return;
+      var scheduled = new Date(now.getFullYear(), now.getMonth(), now.getDate(), start.hour, start.minute);
+      var minutesLate = (now - scheduled) / 60000;
+      if (minutesLate < 30) return;
+      var alertKey = dKey + ':' + s.id;
+      if (state.noShowAlerted[alertKey]) return;
+      var timeLabel = ('0'+start.hour).slice(-2) + ':' + ('0'+start.minute).slice(-2);
+      sendTelegramMessage('⚠️ ' + s.name + ' 학생이 예정 시간(' + timeLabel + ')에서 30분이 지나도록 출석하지 않았습니다.' + (s.cls ? ' (' + s.cls + ')' : ''));
+      state.noShowAlerted[alertKey] = true;
+      changed = true;
+    });
+    if (changed) saveData();
+  }
+  setInterval(checkNoShows, 2 * 60 * 1000);
+
   function syncRosterToCloud() {
     if (!state.sbUrl || !state.sbKey) return;
     var base = state.sbUrl.replace(/\/+$/, '');
@@ -1000,6 +1074,32 @@
       statusEl.textContent = res.ok ? '✅ 테스트 성공! 폰 화면에서 확인해보세요.' : '❌ 실패 (HTTP ' + res.status + ') — URL/키 또는 SQL 설정을 확인해주세요.';
     }).catch(function () {
       statusEl.textContent = '❌ 연결 실패 — URL을 확인해주세요.';
+    });
+  });
+
+  document.getElementById('tgSaveBtn').addEventListener('click', function () {
+    state.tgToken = document.getElementById('tgToken').value.trim();
+    state.tgChatId = document.getElementById('tgChatId').value.trim();
+    saveData();
+    document.getElementById('tgStatus').textContent = '저장되었습니다.';
+  });
+
+  document.getElementById('tgTestBtn').addEventListener('click', function () {
+    var token = document.getElementById('tgToken').value.trim();
+    var chatId = document.getElementById('tgChatId').value.trim();
+    var statusEl = document.getElementById('tgStatus');
+    if (!token || !chatId) { statusEl.textContent = '토큰과 채팅 ID를 먼저 입력해주세요.'; return; }
+    statusEl.textContent = '전송 중...';
+    fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: '📋 클리닉 출석 시스템 테스트 메시지입니다.' })
+    }).then(function (res) {
+      return res.json().then(function (data) {
+        statusEl.textContent = (res.ok && data.ok) ? '✅ 텔레그램으로 전송 성공! 확인해보세요.' : '❌ 실패: ' + (data.description || ('HTTP ' + res.status));
+      });
+    }).catch(function () {
+      statusEl.textContent = '❌ 연결 실패 — 인터넷 연결을 확인해주세요.';
     });
   });
 
