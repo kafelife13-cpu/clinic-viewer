@@ -327,45 +327,61 @@
     var attendance = lastRows.filter(function (r) { return r.checked_in_at && localDateStr(r.checked_in_at) === t; });
     var expected = lastStudents.filter(function (s) { return (s.days || []).indexOf(wKey) !== -1 && (!s.week_start || s.week_start === targetWeek); });
 
+    var expectedIds = expected.map(function (s) { return s.id; });
+    var extra = attendance.filter(function (a) { return expectedIds.indexOf(a.student_id) === -1; });
+
+    var html = '';
+    var presentCount = 0;
+
     if (expected.length === 0) {
-      list.innerHTML = '<div class="empty">' + DAY_LABELS[wKey] + '요일 등록된 클리닉 학생이 없습니다.<br>(명단이 아직 동기화되지 않았을 수도 있어요)</div>';
-      return;
+      html += '<div class="empty">' + DAY_LABELS[wKey] + '요일 등록된 클리닉 학생이 없습니다.<br>(명단이 아직 동기화되지 않았을 수도 있어요)</div>';
+    } else {
+      expected = expected.slice().sort(function (a, b) {
+        var c = (a.class_name||'').localeCompare(b.class_name||'');
+        if (c !== 0) return c;
+        var ti = (a.time_slot||'').localeCompare(b.time_slot||'');
+        if (ti !== 0) return ti;
+        return (a.student_name||'').localeCompare(b.student_name||'', 'ko');
+      });
+
+      var prevCls = undefined, prevTime = undefined;
+      var rosterHtml = expected.map(function (s) {
+        var pieces = '';
+        if (s.class_name !== prevCls) {
+          pieces += '<div class="class-header">' + (s.class_name ? escapeHtml(s.class_name) : '반 미지정') + '</div>';
+          prevCls = s.class_name;
+          prevTime = undefined;
+        }
+        if (s.time_slot !== prevTime) {
+          pieces += '<div class="time-header">' + (s.time_slot ? escapeHtml(s.time_slot) : '시간 미지정') + '</div>';
+          prevTime = s.time_slot;
+        }
+        var rec = attendance.find(function (a) { return a.student_id === s.id; });
+        if (rec) presentCount++;
+        pieces += '<div class="item' + (rec ? '' : ' absent') + '">' +
+          '<div class="left"><div class="name">' + escapeHtml(s.student_name) + '</div></div>' +
+          '<div class="right">' +
+          (rec ? '<span class="pill pill-ok">출석</span>' : '<span class="pill pill-no">미출석</span>') +
+          (rec ? '<span class="time">' + fmtTime(rec.checked_in_at) + '</span>' : '') +
+          '</div></div>';
+        return pieces;
+      }).join('');
+
+      var label = DAY_LABELS[wKey] + '요일 (' + dateLabel + (isToday ? ' · 오늘' : '') + ') — ' + presentCount + ' / ' + expected.length + '명 출석';
+      html += '<div class="day-header">' + label + '</div>' + rosterHtml;
     }
 
-    expected = expected.slice().sort(function (a, b) {
-      var c = (a.class_name||'').localeCompare(b.class_name||'');
-      if (c !== 0) return c;
-      var ti = (a.time_slot||'').localeCompare(b.time_slot||'');
-      if (ti !== 0) return ti;
-      return (a.student_name||'').localeCompare(b.student_name||'', 'ko');
-    });
+    if (extra.length > 0) {
+      var extraHtml = extra.map(function (a) {
+        return '<div class="item">' +
+          '<div class="left"><div class="name">' + escapeHtml(a.student_name) + '</div>' +
+          '<div class="meta">' + metaHtml(a.class_name, a.day_label, a.time_slot) + '</div></div>' +
+          '<div class="time">' + fmtTime(a.checked_in_at) + '</div></div>';
+      }).join('');
+      html += '<div class="class-header">📌 명단 외 출석 (다른 요일 학생이 체크인)</div>' + extraHtml;
+    }
 
-    var presentCount = 0;
-    var prevCls = undefined, prevTime = undefined;
-    var html = expected.map(function (s) {
-      var pieces = '';
-      if (s.class_name !== prevCls) {
-        pieces += '<div class="class-header">' + (s.class_name ? escapeHtml(s.class_name) : '반 미지정') + '</div>';
-        prevCls = s.class_name;
-        prevTime = undefined;
-      }
-      if (s.time_slot !== prevTime) {
-        pieces += '<div class="time-header">' + (s.time_slot ? escapeHtml(s.time_slot) : '시간 미지정') + '</div>';
-        prevTime = s.time_slot;
-      }
-      var rec = attendance.find(function (a) { return a.student_id === s.id; });
-      if (rec) presentCount++;
-      pieces += '<div class="item' + (rec ? '' : ' absent') + '">' +
-        '<div class="left"><div class="name">' + escapeHtml(s.student_name) + '</div></div>' +
-        '<div class="right">' +
-        (rec ? '<span class="pill pill-ok">출석</span>' : '<span class="pill pill-no">미출석</span>') +
-        (rec ? '<span class="time">' + fmtTime(rec.checked_in_at) + '</span>' : '') +
-        '</div></div>';
-      return pieces;
-    }).join('');
-
-    var label = DAY_LABELS[wKey] + '요일 (' + dateLabel + (isToday ? ' · 오늘' : '') + ') — ' + presentCount + ' / ' + expected.length + '명 출석';
-    list.innerHTML = '<div class="day-header">' + label + '</div>' + html;
+    list.innerHTML = html;
   }
 
   function renderAll() {
