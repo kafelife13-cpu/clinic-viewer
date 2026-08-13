@@ -1063,6 +1063,10 @@
     }).then(function(data){
       var requests=data[0]||[], slots=data[1]||[], users=data[2]||[], schools=data[3]||[];
       var updated=0, added=0, unmatched=[];
+      state.students=state.students.filter(function(s){
+        if(s.name==='윤형진'||s.name==='박시우')return false;
+        return true;
+      });
       var used={};state.students.forEach(function(s){if(s.phone)used[s.phone]=true;});
       users.filter(function(u){return u.role==='student'&&u.status==='active';}).forEach(function(user){
         var linked=state.students.find(function(s){return s.kingStudentId===user.id;});
