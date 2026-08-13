@@ -1,7 +1,8 @@
 {
-  "name": "클리닉 출석 현황",
+  "name": "클리닉 출석 체크",
   "short_name": "클리닉출석",
-  "start_url": "./",
+  "id": "./kiosk/",
+  "start_url": "./kiosk/?v=20260813-2",
   "display": "standalone",
   "background_color": "#f4f6fb",
   "theme_color": "#2f6fed",
