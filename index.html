@@ -417,7 +417,8 @@
       });
     }
     Promise.all([
-      getJson('clinic_attendance?select=*&order=checked_in_at.desc&limit=200'),
+      // 출석 기록 테이블이 아직 없는 프로젝트에서도 확정 학생 명단은 표시한다.
+      getJson('clinic_attendance?select=*&order=checked_in_at.desc&limit=200').catch(function () { return []; }),
       getJson('clinic_requests?select=*&status=eq.confirmed&order=created_at.desc'),
       getJson('clinic_slots?select=*'),
       getJson('users?select=id,name,school_id,status,role'),
@@ -439,7 +440,8 @@
         var slot = slots.find(function (s) { return s.id === req.slot_id; });
         var user = users.find(function (u) { return u.id === studentId; });
         if (!slot || !user || user.role !== 'student' || user.status !== 'active') return null;
-        var school = schools.find(function (s) { return s.id === (slot.school_id || user.school_id); });
+        // 다른 학교 장소의 클리닉에 교사가 수동 배정해도 학생의 원래 학교로 표시한다.
+        var school = schools.find(function (s) { return s.id === (req.school_id || user.school_id || slot.school_id); });
         return {
           id: user.id,
           student_name: user.name,
