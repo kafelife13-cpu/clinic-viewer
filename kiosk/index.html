@@ -289,6 +289,7 @@
           <div class="form-row">
             <button class="btn btn-primary" id="sbSaveBtn">저장</button>
             <button class="btn btn-ghost" id="sbTestBtn">테스트 전송</button>
+            <button class="btn btn-primary" id="phoneLinkBtn">📱 폰 연결 링크 복사</button>
           </div>
           <div class="muted-small" id="sbStatus"></div>
           <div class="form-row" style="margin-top:14px; border-top:1px solid var(--border); padding-top:14px;">
@@ -1112,6 +1113,14 @@
     saveData();
     document.getElementById('sbStatus').textContent = '저장되었습니다.';
     importApprovedKingRequests();
+  });
+
+  document.getElementById('phoneLinkBtn').addEventListener('click', function () {
+    var statusEl=document.getElementById('sbStatus');
+    if(!state.sbUrl||!state.sbKey){statusEl.textContent='먼저 Supabase 연결을 저장해주세요.';return;}
+    var base=location.href.replace(/\/kiosk\/.*$/,'/');
+    var link=base+'#u='+encodeURIComponent(state.sbUrl)+'&k='+encodeURIComponent(state.sbKey);
+    navigator.clipboard.writeText(link).then(function(){statusEl.textContent='✅ 폰 연결 링크를 복사했습니다. 휴대폰으로 보내서 열어주세요.';}).catch(function(){prompt('아래 링크를 복사해 휴대폰에서 열어주세요.',link);});
   });
 
   document.getElementById('sbSyncRosterBtn').addEventListener('click', function () {
