@@ -153,8 +153,13 @@
 (function () {
   "use strict";
   var LS_KEY = 'clinicViewer.v1';
-  var cfg = null;
-  try { cfg = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch (e) {}
+  // 이 출결판은 국어왕 전용이므로 휴대폰에 예전/잘못된 연결정보가 남아 있어도
+  // 항상 현재 운영 Supabase로 자동 연결한다.
+  var cfg = {
+    url: 'https://zniwzwanlvvmzkkcmikh.supabase.co',
+    key: 'sb_publishable_IbfVcXs5TmXfumrnK4Somg_7MzygCdh'
+  };
+  localStorage.setItem(LS_KEY, JSON.stringify(cfg));
 
   // allow one-time setup via URL hash: #u=<url>&k=<key>
   if (!cfg && location.hash.length > 1) {
