@@ -934,10 +934,10 @@
   function syncAttendanceToKing(student, attId, isoWhen) {
     if(!student||!student.kingStudentId||!student.kingSlotId)return Promise.resolve(false);
     var safeId='att_'+String(attId||uid()).replace(/[^a-zA-Z0-9_-]/g,'_');
-    return fetch(KING_SB_URL+'/rest/v1/clinic_requests?on_conflict=id',{
+    return fetch(KING_SB_URL+'/rest/v1/clinic_attendance?on_conflict=id',{
       method:'POST',
       headers:{'apikey':KING_SB_KEY,'Authorization':'Bearer '+KING_SB_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'},
-      body:JSON.stringify({id:safeId,slot_id:student.kingSlotId,student_id:student.kingStudentId,school_id:student.kingSchoolId||null,status:'attended',created_at:isoWhen||new Date().toISOString()})
+      body:JSON.stringify({id:safeId,student_id:student.kingStudentId,student_name:student.name,class_name:student.cls||null,day_label:student.days&&student.days.length?DAY_LABELS[student.days[0]]:null,time_slot:student.time||null,checked_in_at:isoWhen||new Date().toISOString()})
     }).then(function(res){return res.ok;}).catch(function(){return false;});
   }
 
