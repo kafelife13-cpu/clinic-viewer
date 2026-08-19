@@ -167,9 +167,9 @@
   if (!cfg) {
     try { cfg = JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch (e) { cfg = null; }
   }
-  if (!cfg) cfg = {
-    url: 'https://zniwzwanlvvmzkkcmikh.supabase.co',
-    key: 'sb_publishable_IbfVcXs5TmXfumrnK4Somg_7MzygCdh'
+  if (!cfg || cfg.url !== 'https://vpucowvjgkppdbotxjxd.supabase.co') cfg = {
+    url: 'https://vpucowvjgkppdbotxjxd.supabase.co',
+    key: 'sb_publishable_9iZiIDhEakwNmSMYSg11Cg_hfGZk8Hx'
   };
   localStorage.setItem(LS_KEY, JSON.stringify(cfg));
 
