@@ -1137,7 +1137,11 @@
         state.students.push({id:uid(),name:user.name,phone:code,days:[],cls:school?school.name:'국어왕',time:'',weekStart:'',kingStudentId:user.id,temporaryCode:true});
         added++;
       });
-      requests.forEach(function(req){
+      var latestConfirmedByStudent={};
+      requests.slice().sort(function(a,b){return new Date(b.created_at)-new Date(a.created_at);}).forEach(function(req){
+        if(!latestConfirmedByStudent[req.student_id])latestConfirmedByStudent[req.student_id]=req;
+      });
+      Object.keys(latestConfirmedByStudent).map(function(studentId){return latestConfirmedByStudent[studentId];}).forEach(function(req){
         var slot=slots.find(function(x){return x.id===req.slot_id;});
         var user=users.find(function(x){return x.id===req.student_id;});
         if(!slot||!user)return;
