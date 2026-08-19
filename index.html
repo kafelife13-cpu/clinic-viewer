@@ -83,6 +83,12 @@
   .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 800; }
   .pill-ok { background: #e5f8ef; color: var(--success); }
   .pill-no { background: #fdeceb; color: var(--danger); }
+  .attendance-action {
+    border: 0; border-radius: 8px; padding: 6px 9px; font-size: 11px; font-weight: 800;
+    color: #fff; background: var(--primary); cursor: pointer; white-space: nowrap;
+  }
+  .attendance-action.cancel { color: var(--danger); background: #fdeceb; }
+  .attendance-action:disabled { opacity: .5; cursor: wait; }
   .group-label { font-size: 12px; font-weight: 800; color: var(--muted); margin: 18px 2px 8px; }
   .group-label:first-child { margin-top: 0; }
   .day-header { font-size: 15px; font-weight: 800; color: var(--primary-dark); margin: 0 2px 14px; }
@@ -153,6 +159,7 @@
 (function () {
   "use strict";
   var LS_KEY = 'clinicViewer.v1';
+  var adminPin = '';
   // 패드에서 만든 연결 링크(#u=...&k=...)를 최우선으로 사용한다.
   var cfg = null;
   if (location.hash.length > 1) {
@@ -315,6 +322,15 @@
     return normalizedStudentName(record.student_name) === normalizedStudentName(student.student_name);
   }
 
+  function selectedAttendanceDate() {
+    return explicitDate || dateForDayKey(selectedDayKey);
+  }
+
+  function checkInIsoForDate(d) {
+    var now = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), now.getHours(), now.getMinutes(), now.getSeconds()).toISOString();
+  }
+
   function fmtTime(iso) {
     var d = new Date(iso);
     return ('0'+d.getHours()).slice(-2) + ':' + ('0'+d.getMinutes()).slice(-2);
@@ -379,6 +395,9 @@
           '<div class="right">' +
           (rec ? '<span class="pill pill-ok">출석</span>' : '<span class="pill pill-no">미출석</span>') +
           (rec ? '<span class="time">' + fmtTime(rec.checked_in_at) + '</span>' : '') +
+          (rec
+            ? '<button class="attendance-action cancel" data-action="cancel" data-record-id="' + escapeHtml(rec.id) + '" data-student-id="' + escapeHtml(s.id) + '">출석 취소</button>'
+            : '<button class="attendance-action" data-action="present" data-student-id="' + escapeHtml(s.id) + '">출석 처리</button>') +
           '</div></div>';
         return pieces;
       }).join('');
@@ -417,6 +436,57 @@
   function render() {
     if (filter === 'today') renderToday(); else renderAll();
   }
+
+  document.getElementById('list').addEventListener('click', function (event) {
+    var button = event.target.closest('.attendance-action');
+    if (!button || button.disabled) return;
+    if (!adminPin) {
+      var enteredPin = prompt('교사 PIN 4자리를 입력하세요.');
+      if (enteredPin === null) return;
+      adminPin = enteredPin;
+    }
+    var studentId = button.getAttribute('data-student-id');
+    var student = lastStudents.find(function (s) { return String(s.id) === String(studentId); });
+    if (!student) { alert('학생 정보를 찾지 못했습니다. 화면을 새로고침해주세요.'); return; }
+    var action = button.getAttribute('data-action');
+    var targetDate = selectedAttendanceDate();
+    if (action === 'cancel' && !confirm(student.student_name + ' 학생의 출석을 취소할까요?')) return;
+    button.disabled = true;
+    button.textContent = '처리 중...';
+    var headers = {
+      'apikey': cfg.key,
+      'Authorization': 'Bearer ' + cfg.key,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    };
+    var request = fetch(cfg.url + '/rest/v1/rpc/teacher_edit_attendance', {
+      method: 'POST', headers: headers,
+      body: JSON.stringify({
+        p_pin: adminPin,
+        p_action: action,
+        p_record_id: action === 'cancel' ? Number(button.getAttribute('data-record-id')) : null,
+        p_student_id: student.id,
+        p_student_name: student.student_name,
+        p_class_name: student.class_name || null,
+        p_day_label: DAY_LABELS[selectedDayKey],
+        p_time_slot: student.time_slot || null,
+        p_checked_in_at: checkInIsoForDate(targetDate)
+      })
+    });
+    request.then(function (res) {
+      if (!res.ok) return res.text().then(function (msg) { throw new Error(msg || ('HTTP ' + res.status)); });
+      fetchData(false);
+    }).catch(function (err) {
+      if (String((err && err.message) || err).indexOf('invalid teacher pin') !== -1) {
+        adminPin = '';
+        alert('교사 PIN이 맞지 않습니다.');
+      } else {
+        alert('출결 수정에 실패했습니다. 인터넷 연결을 확인하고 다시 눌러주세요.');
+      }
+      button.disabled = false;
+      button.textContent = action === 'present' ? '출석 처리' : '출석 취소';
+    });
+  });
 
   function setStatus(ok, text) {
     document.getElementById('statusDot').classList.toggle('off', !ok);
