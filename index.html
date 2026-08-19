@@ -306,6 +306,15 @@
     });
   }
 
+  function normalizedStudentName(name) {
+    return String(name || '').replace(/\s+/g, '').trim();
+  }
+
+  function attendanceMatchesStudent(record, student) {
+    if (record.student_id && student.id && record.student_id === student.id) return true;
+    return normalizedStudentName(record.student_name) === normalizedStudentName(student.student_name);
+  }
+
   function fmtTime(iso) {
     var d = new Date(iso);
     return ('0'+d.getHours()).slice(-2) + ':' + ('0'+d.getMinutes()).slice(-2);
@@ -333,8 +342,9 @@
     var attendance = lastRows.filter(function (r) { return r.checked_in_at && localDateStr(r.checked_in_at) === t; });
     var expected = lastStudents.filter(function (s) { return (s.days || []).indexOf(wKey) !== -1 && (!s.week_start || s.week_start === targetWeek); });
 
-    var expectedIds = expected.map(function (s) { return s.id; });
-    var extra = attendance.filter(function (a) { return expectedIds.indexOf(a.student_id) === -1; });
+    var extra = attendance.filter(function (a) {
+      return !expected.some(function (s) { return attendanceMatchesStudent(a, s); });
+    });
 
     var html = '';
     var presentCount = 0;
@@ -362,7 +372,7 @@
           pieces += '<div class="time-header">' + (s.time_slot ? escapeHtml(s.time_slot) : '시간 미지정') + '</div>';
           prevTime = s.time_slot;
         }
-        var rec = attendance.find(function (a) { return a.student_id === s.id; });
+        var rec = attendance.find(function (a) { return attendanceMatchesStudent(a, s); });
         if (rec) presentCount++;
         pieces += '<div class="item' + (rec ? '' : ' absent') + '">' +
           '<div class="left"><div class="name">' + escapeHtml(s.student_name) + '</div></div>' +
