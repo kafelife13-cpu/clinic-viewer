@@ -1034,6 +1034,40 @@
   }
   setInterval(checkNoShows, 2 * 60 * 1000);
 
+  // 수요일 유동 등원 학생의 현재 도착 현황을 15:30, 16:30, 17:30에 한 번씩 알린다.
+  // 이 알림은 지각 판정이 아니라 교사가 현재 도착 여부를 확인하기 위한 현황 보고다.
+  function checkWednesdayArrivalSummary() {
+    if (!state.tgToken || !state.tgChatId) return;
+    var now = new Date();
+    if (dayKeyOf(now) !== 'wed') return;
+    var checkpointHour = now.getHours();
+    if ([15, 16, 17].indexOf(checkpointHour) === -1) return;
+    if (now.getMinutes() < 30) return;
+    var dKey = todayKey(now);
+    var alertKey = dKey + ':arrival-summary:' + checkpointHour;
+    if (state.noShowAlerted[alertKey]) return;
+    var curWeek = mondayStr(now);
+    var expected = state.students.filter(function (s) {
+      return s.days.indexOf('wed') !== -1 && (!s.weekStart || s.weekStart === curWeek);
+    });
+    if (!expected.length) return;
+    var arrived = [], waiting = [];
+    expected.forEach(function (s) {
+      var checked = state.attendance.some(function (a) { return a.studentId === s.id && a.date === dKey; });
+      (checked ? arrived : waiting).push(s.name);
+    });
+    var label = checkpointHour + '시 30분';
+    var message = '📋 수요일 클리닉 ' + label + ' 도착 현황\n' +
+      '출석 ' + arrived.length + ' / ' + expected.length + '명\n' +
+      '✅ 도착: ' + (arrived.length ? arrived.join(', ') : '없음') + '\n' +
+      '⏳ 아직 안 옴: ' + (waiting.length ? waiting.join(', ') : '없음');
+    sendTelegramMessage(message);
+    state.noShowAlerted[alertKey] = true;
+    saveData();
+  }
+  checkWednesdayArrivalSummary();
+  setInterval(checkWednesdayArrivalSummary, 60 * 1000);
+
   function syncRosterToCloud() {
     if (!state.sbUrl || !state.sbKey) return;
     var base = state.sbUrl.replace(/\/+$/, '');
