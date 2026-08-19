@@ -422,13 +422,21 @@
         return res.json();
       });
     }
+    var kingUrl='https://zniwzwanlvvmzkkcmikh.supabase.co';
+    var kingKey='sb_publishable_IbfVcXs5TmXfumrnK4Somg_7MzygCdh';
+    var kingHeaders={'apikey':kingKey,'Authorization':'Bearer '+kingKey};
+    function getKingJson(path){
+      return fetch(kingUrl+'/rest/v1/'+path,{headers:kingHeaders}).then(function(res){
+        if(!res.ok)throw new Error('http '+res.status+' ('+path.split('?')[0]+')');
+        return res.json();
+      });
+    }
     Promise.all([
-      // 출석 기록 테이블이 아직 없는 프로젝트에서도 확정 학생 명단은 표시한다.
-      getJson('clinic_attendance?select=*&order=checked_in_at.desc&limit=200').catch(function () { return []; }),
-      getJson('clinic_requests?select=*&status=eq.confirmed&order=created_at.desc'),
-      getJson('clinic_slots?select=*'),
-      getJson('users?select=id,name,school_id,status,role'),
-      getJson('qa_schools?select=id,name')
+      getJson('clinic_attendance?select=*&order=checked_in_at.desc&limit=200'),
+      getKingJson('clinic_requests?select=*&status=eq.confirmed&order=created_at.desc'),
+      getKingJson('clinic_slots?select=*'),
+      getKingJson('users?select=id,name,school_id,status,role'),
+      getKingJson('qa_schools?select=id,name')
     ]).then(function (results) {
       if (isFirstConnect) {
         localStorage.setItem(LS_KEY, JSON.stringify(cfg));
