@@ -930,6 +930,7 @@
   }
 
   function retryPendingSync() {
+    if (!state.sbUrl || !state.sbKey || !navigator.onLine) return;
     var pending = state.attendance.filter(function (a) { return !a.synced; });
     var statusEl = document.getElementById('sbRetryStatus');
     if (pending.length === 0) {
@@ -1132,6 +1133,9 @@
   setInterval(importApprovedKingRequests, 60000);
 
   document.getElementById('sbRetryBtn').addEventListener('click', retryPendingSync);
+  window.addEventListener('online', function () { setTimeout(retryPendingSync, 500); });
+  setTimeout(retryPendingSync, 1500);
+  setInterval(retryPendingSync, 30000);
 
   document.getElementById('sbTestBtn').addEventListener('click', function () {
     var url = document.getElementById('sbUrl').value.trim().replace(/\/+$/, '');
