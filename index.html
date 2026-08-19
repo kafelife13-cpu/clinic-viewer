@@ -426,6 +426,7 @@
       // 출석 기록 테이블이 아직 없는 프로젝트에서도 확정 학생 명단은 표시한다.
       getJson('clinic_attendance?select=*&order=checked_in_at.desc&limit=200').catch(function () { return []; }),
       getJson('clinic_requests?select=*&status=eq.confirmed&order=created_at.desc'),
+      getJson('clinic_requests?select=*&status=eq.attended&order=created_at.desc&limit=200').catch(function(){return [];}),
       getJson('clinic_slots?select=*'),
       getJson('users?select=id,name,school_id,status,role'),
       getJson('qa_schools?select=id,name')
@@ -434,8 +435,13 @@
         localStorage.setItem(LS_KEY, JSON.stringify(cfg));
         showMain();
       }
-      lastRows = results[0];
-      var requests = results[1], slots = results[2], users = results[3], schools = results[4];
+      var requests = results[1], attended = results[2], slots = results[3], users = results[4], schools = results[5];
+      lastRows = (results[0]||[]).concat(attended.map(function(a){
+        var user=users.find(function(u){return u.id===a.student_id;});
+        var slot=slots.find(function(s){return s.id===a.slot_id;});
+        var school=schools.find(function(s){return s.id===(a.school_id||(user&&user.school_id)||(slot&&slot.school_id));});
+        return {id:a.id,student_id:a.student_id,student_name:user?user.name:a.student_id,class_name:school?school.name:'',day_label:slot?slot.day_of_week:'',time_slot:slot?(slot.start_time||slot.label||''):'',checked_in_at:a.created_at};
+      }));
       var latestByStudent = {};
       requests.forEach(function (req) {
         if (!latestByStudent[req.student_id]) latestByStudent[req.student_id] = req;

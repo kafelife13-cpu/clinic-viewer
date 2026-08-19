@@ -530,6 +530,7 @@
     state.attendance.push({ id: attId, studentId: student.id, date: dKey, day: wKey, time: timeStr, iso: isoNow, synced: false });
     saveData();
     syncAttendanceToCloud(student, wKey, timeStr, attId, isoNow);
+    syncAttendanceToKing(student, attId, isoNow);
 
     var scheduled = student.days.indexOf(wKey) !== -1;
     if (scheduled) {
@@ -930,6 +931,26 @@
     });
   }
 
+  function syncAttendanceToKing(student, attId, isoWhen) {
+    if(!student||!student.kingStudentId||!student.kingSlotId)return Promise.resolve(false);
+    var safeId='att_'+String(attId||uid()).replace(/[^a-zA-Z0-9_-]/g,'_');
+    return fetch(KING_SB_URL+'/rest/v1/clinic_requests?on_conflict=id',{
+      method:'POST',
+      headers:{'apikey':KING_SB_KEY,'Authorization':'Bearer '+KING_SB_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'},
+      body:JSON.stringify({id:safeId,slot_id:student.kingSlotId,student_id:student.kingStudentId,school_id:student.kingSchoolId||null,status:'attended',created_at:isoWhen||new Date().toISOString()})
+    }).then(function(res){return res.ok;}).catch(function(){return false;});
+  }
+
+  function syncTodayAttendanceToKing(){
+    var today=todayKey(new Date());
+    var rows=state.attendance.filter(function(a){return a.date===today&&!a.kingSynced;});
+    if(!rows.length)return Promise.resolve([]);
+    return Promise.all(rows.map(function(a){
+      var student=state.students.find(function(s){return s.id===a.studentId;});
+      return syncAttendanceToKing(student,a.id,a.iso).then(function(ok){if(ok)a.kingSynced=true;return ok;});
+    })).then(function(results){saveData();return results;});
+  }
+
   function retryPendingSync() {
     if (!state.sbUrl || !state.sbKey || !navigator.onLine) return;
     var pending = state.attendance.filter(function (a) { return !a.synced; });
@@ -1091,6 +1112,9 @@
         var sameName=state.students.filter(function(s){return (s.name||'').replace(/\s/g,'')===(user.name||'').replace(/\s/g,'');});
         if(!student&&sameName.length===1)student=sameName[0];
         if(student){
+          student.kingStudentId=user.id;
+          student.kingSlotId=req.slot_id;
+          student.kingSchoolId=req.school_id||user.school_id||slot.school_id||null;
           student.days=[dayKey];
           student.time=slot.start_time||slot.label||student.time||'';
           if(slot.slot_date)student.weekStart=mondayStr(new Date(slot.slot_date+'T12:00:00'));
@@ -1100,6 +1124,7 @@
         }
       });
       saveData();renderStudentTable();refreshAttendancePanel();
+      syncTodayAttendanceToKing();
       var msg='✅ 국어왕 학생 전체 연동 완료: 새 학생 '+added+'명, 시간 반영 '+updated+'명';
       if(unmatched.length)msg+=' · 이름 확인 필요 '+unmatched.length+'명 ('+unmatched.join(', ')+')';
       statusEl.textContent=msg;
