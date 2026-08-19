@@ -410,22 +410,45 @@
   function fetchData(isFirstConnect) {
     if (!cfg) { showSetup(); return; }
     var headers = { 'apikey': cfg.key, 'Authorization': 'Bearer ' + cfg.key };
+    function getJson(path) {
+      return fetch(cfg.url + '/rest/v1/' + path, { headers: headers }).then(function (res) {
+        if (!res.ok) throw new Error('http ' + res.status + ' (' + path.split('?')[0] + ')');
+        return res.json();
+      });
+    }
     Promise.all([
-      fetch(cfg.url + '/rest/v1/clinic_attendance?select=*&order=checked_in_at.desc&limit=200', { headers: headers }).then(function (res) {
-        if (!res.ok) throw new Error('http ' + res.status);
-        return res.json();
-      }),
-      fetch(cfg.url + '/rest/v1/clinic_students?select=*', { headers: headers }).then(function (res) {
-        if (!res.ok) throw new Error('http ' + res.status);
-        return res.json();
-      })
+      getJson('clinic_attendance?select=*&order=checked_in_at.desc&limit=200'),
+      getJson('clinic_requests?select=*&status=eq.confirmed&order=created_at.desc'),
+      getJson('clinic_slots?select=*'),
+      getJson('users?select=id,name,school_id,status,role'),
+      getJson('qa_schools?select=id,name')
     ]).then(function (results) {
       if (isFirstConnect) {
         localStorage.setItem(LS_KEY, JSON.stringify(cfg));
         showMain();
       }
       lastRows = results[0];
-      lastStudents = results[1];
+      var requests = results[1], slots = results[2], users = results[3], schools = results[4];
+      var latestByStudent = {};
+      requests.forEach(function (req) {
+        if (!latestByStudent[req.student_id]) latestByStudent[req.student_id] = req;
+      });
+      var dayToKey = {'일':'sun','월':'mon','화':'tue','수':'wed','목':'thu','금':'fri','토':'sat'};
+      lastStudents = Object.keys(latestByStudent).map(function (studentId) {
+        var req = latestByStudent[studentId];
+        var slot = slots.find(function (s) { return s.id === req.slot_id; });
+        var user = users.find(function (u) { return u.id === studentId; });
+        if (!slot || !user || user.role !== 'student' || user.status !== 'active') return null;
+        var school = schools.find(function (s) { return s.id === (slot.school_id || user.school_id); });
+        return {
+          id: user.id,
+          student_name: user.name,
+          class_name: school ? school.name : '',
+          days: dayToKey[slot.day_of_week] ? [dayToKey[slot.day_of_week]] : [],
+          time_slot: slot.start_time || slot.label || '',
+          week_start: null
+        };
+      }).filter(Boolean);
       render();
       var now = new Date();
       document.getElementById('lastUpdated').textContent = '마지막 갱신: ' + ('0'+now.getHours()).slice(-2) + ':' + ('0'+now.getMinutes()).slice(-2) + ':' + ('0'+now.getSeconds()).slice(-2);
