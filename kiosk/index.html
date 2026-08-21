@@ -1198,6 +1198,46 @@
     var base=location.href.replace(/\/kiosk\/.*$/,'/');
     return base+'#u='+encodeURIComponent(state.sbUrl)+'&k='+encodeURIComponent(state.sbKey);
   }
+
+  // 패드의 브라우저 저장값이 지워져도 클라우드의 학생 명단을 먼저 복구한다.
+  function loadRosterFromCloud() {
+    if (!state.sbUrl || !state.sbKey) return Promise.resolve(false);
+    var base = state.sbUrl.replace(/\/+$/, '');
+    var headers = {'apikey': state.sbKey, 'Authorization': 'Bearer ' + state.sbKey};
+    return fetch(base + '/rest/v1/clinic_students?select=id,student_name,class_name,time_slot,days,week_start&limit=1000', {headers: headers})
+      .then(function (res) {
+        if (!res.ok) return res.text().then(function (t) { throw new Error(t); });
+        return res.json();
+      })
+      .then(function (rows) {
+        if (!Array.isArray(rows) || rows.length === 0) return false;
+        var previous = state.students || [];
+        state.students = rows.map(function (row) {
+          var phoneVal = String(row.id || '').split('-')[0];
+          var old = previous.find(function (s) {
+            return s.phone === phoneVal && (s.weekStart || '') === (row.week_start || '');
+          }) || previous.find(function (s) {
+            return (s.name || '').replace(/\s/g, '') === (row.student_name || '').replace(/\s/g, '');
+          });
+          return {
+            id: old && old.id ? old.id : uid(),
+            name: row.student_name || '',
+            phone: phoneVal,
+            days: Array.isArray(row.days) ? row.days : [],
+            cls: row.class_name || '',
+            time: row.time_slot || '',
+            weekStart: row.week_start || '',
+            kingStudentId: old && old.kingStudentId ? old.kingStudentId : null,
+            kingSlotId: old && old.kingSlotId ? old.kingSlotId : null,
+            kingSchoolId: old && old.kingSchoolId ? old.kingSchoolId : null
+          };
+        });
+        saveData();
+        renderStudentTable();
+        refreshAttendancePanel();
+        return true;
+      });
+  }
   document.getElementById('phoneLinkBtn').addEventListener('click', function () {
     var statusEl=document.getElementById('sbStatus');
     if(!state.sbUrl||!state.sbKey){statusEl.textContent='먼저 Supabase 연결을 저장해주세요.';return;}
@@ -1230,8 +1270,12 @@
     }
   });
 
-  document.getElementById('kingSyncBtn').addEventListener('click', importApprovedKingRequests);
-  setTimeout(importApprovedKingRequests, 1000);
+  document.getElementById('kingSyncBtn').addEventListener('click', function () {
+    loadRosterFromCloud().then(importApprovedKingRequests).catch(importApprovedKingRequests);
+  });
+  setTimeout(function () {
+    loadRosterFromCloud().then(importApprovedKingRequests).catch(importApprovedKingRequests);
+  }, 500);
   setInterval(importApprovedKingRequests, 60000);
 
   document.getElementById('sbRetryBtn').addEventListener('click', retryPendingSync);
