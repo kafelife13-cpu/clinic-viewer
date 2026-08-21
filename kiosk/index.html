@@ -400,16 +400,25 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }
 
+  var ATTENDANCE_SB_URL = 'https://vpucowvjgkppdbotxjxd.supabase.co';
+  var ATTENDANCE_SB_KEY = 'sb_publishable_9iZiIDhEakwNmSMYSg11Cg_hfGZk8Hx';
   var state = loadData();
   if (!state.pin) state.pin = '0000';
-  if (!state.sbUrl) state.sbUrl = '';
-  if (!state.sbKey) state.sbKey = '';
+  // 패드마다 설정값이 지워져도 출석 기록은 항상 같은 출결 클라우드로 전송한다.
+  state.sbUrl = ATTENDANCE_SB_URL;
+  state.sbKey = ATTENDANCE_SB_KEY;
   if (!state.tgToken) state.tgToken = '';
   if (!state.tgChatId) state.tgChatId = '';
   if (!state.noShowAlerted) state.noShowAlerted = {};
 
   function digitsOnly(s) { return (s || '').replace(/\D/g, ''); }
   function formatPhone(d) { return d; }
+  // 학원 운영일은 새벽 4시에 바뀐다. 자정~03:59 출석은 전날 기록으로 처리한다.
+  function operationalDate(dateObj) {
+    var d = new Date(dateObj || new Date());
+    if (d.getHours() < 4) d.setDate(d.getDate() - 1);
+    return d;
+  }
   function todayKey(dateObj) {
     var y = dateObj.getFullYear(), m = ('0'+(dateObj.getMonth()+1)).slice(-2), d = ('0'+dateObj.getDate()).slice(-2);
     return y + '-' + m + '-' + d;
@@ -448,8 +457,9 @@
     var candidates = state.students.filter(function (s) { return s.phone === phoneVal; });
     if (candidates.length === 0) return null;
     if (candidates.length === 1) return candidates[0];
-    var curWeek = mondayStr(new Date());
-    var wKey = dayKeyOf(new Date());
+    var opNow = operationalDate(new Date());
+    var curWeek = mondayStr(opNow);
+    var wKey = dayKeyOf(opNow);
     var best = candidates.find(function (s) { return (!s.weekStart || s.weekStart === curWeek) && s.days.indexOf(wKey) !== -1; });
     if (best) return best;
     best = candidates.find(function (s) { return !s.weekStart || s.weekStart === curWeek; });
@@ -476,7 +486,8 @@
 
   function updateTodayLabel() {
     var now = new Date();
-    var label = (now.getMonth()+1) + '월 ' + now.getDate() + '일 (' + DAY_LABELS[dayKeyOf(now)] + ') ' +
+    var opNow = operationalDate(now);
+    var label = (opNow.getMonth()+1) + '월 ' + opNow.getDate() + '일 (' + DAY_LABELS[dayKeyOf(opNow)] + ') ' +
       ('0'+now.getHours()).slice(-2) + ':' + ('0'+now.getMinutes()).slice(-2);
     document.getElementById('todayLabel').textContent = label;
   }
@@ -517,8 +528,9 @@
       return;
     }
     var now = new Date();
-    var dKey = todayKey(now);
-    var wKey = dayKeyOf(now);
+    var opNow = operationalDate(now);
+    var dKey = todayKey(opNow);
+    var wKey = dayKeyOf(opNow);
 
     var already = state.attendance.find(function (a) { return a.studentId === student.id && a.date === dKey; });
     if (already) {
@@ -581,7 +593,7 @@
     document.getElementById('kiosk').style.display = 'none';
     renderStudentTable();
     var attDate = document.getElementById('attDate');
-    if (!attDate.value) attDate.value = todayKey(new Date());
+    if (!attDate.value) attDate.value = todayKey(operationalDate(new Date()));
     refreshAttendancePanel();
     document.getElementById('sbUrl').value = state.sbUrl;
     document.getElementById('sbKey').value = state.sbKey;
@@ -764,7 +776,7 @@
   attDateInput.addEventListener('change', refreshAttendancePanel);
 
   function refreshAttendancePanel() {
-    var dateVal = attDateInput.value || todayKey(new Date());
+    var dateVal = attDateInput.value || todayKey(operationalDate(new Date()));
     var parts = dateVal.split('-').map(Number);
     var dateObj = new Date(parts[0], parts[1]-1, parts[2]);
     var wKey = dayKeyOf(dateObj);
@@ -944,7 +956,7 @@
   }
 
   function syncTodayAttendanceToKing(){
-    var today=todayKey(new Date());
+    var today=todayKey(operationalDate(new Date()));
     var rows=state.attendance.filter(function(a){return a.date===today&&!a.kingSynced;});
     if(!rows.length)return Promise.resolve([]);
     return Promise.all(rows.map(function(a){
@@ -1008,9 +1020,10 @@
   function checkNoShows() {
     if (!state.tgToken || !state.tgChatId) return;
     var now = new Date();
-    var dKey = todayKey(now);
-    var wKey = dayKeyOf(now);
-    var curWeek = mondayStr(now);
+    var opNow = operationalDate(now);
+    var dKey = todayKey(opNow);
+    var wKey = dayKeyOf(opNow);
+    var curWeek = mondayStr(opNow);
     var expected = state.students.filter(function (s) {
       return s.days.indexOf(wKey) !== -1 && (!s.weekStart || s.weekStart === curWeek);
     });
@@ -1039,14 +1052,15 @@
   function checkWednesdayArrivalSummary() {
     if (!state.tgToken || !state.tgChatId) return;
     var now = new Date();
-    if (dayKeyOf(now) !== 'wed') return;
+    var opNow = operationalDate(now);
+    if (dayKeyOf(opNow) !== 'wed') return;
     var checkpointHour = now.getHours();
     if ([15, 16, 17].indexOf(checkpointHour) === -1) return;
     if (now.getMinutes() < 30) return;
-    var dKey = todayKey(now);
+    var dKey = todayKey(opNow);
     var alertKey = dKey + ':arrival-summary:' + checkpointHour;
     if (state.noShowAlerted[alertKey]) return;
-    var curWeek = mondayStr(now);
+    var curWeek = mondayStr(opNow);
     var expected = state.students.filter(function (s) {
       return s.days.indexOf('wed') !== -1 && (!s.weekStart || s.weekStart === curWeek);
     });

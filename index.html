@@ -220,7 +220,12 @@
   var DAY_ORDER = ['mon','tue','wed','thu','fri','sat','sun'];
   var DAY_LABELS = {sun:'일', mon:'월', tue:'화', wed:'수', thu:'목', fri:'금', sat:'토'};
 
-  function todayDayKey() { return DAY_KEYS[new Date().getDay()]; }
+  function operationalDate(dateObj) {
+    var d = new Date(dateObj || new Date());
+    if (d.getHours() < 4) d.setDate(d.getDate() - 1);
+    return d;
+  }
+  function todayDayKey() { return DAY_KEYS[operationalDate(new Date()).getDay()]; }
   var selectedDayKey = todayDayKey();
   var explicitDate = null; // when set (via date picker), overrides the "this week's Xday" resolution
 
@@ -231,7 +236,7 @@
   // checked_in_at is stored as UTC ISO; compare using the viewer's local calendar date,
   // not the raw UTC date string (which would be off by one during KST midnight-9am).
   function localDateStr(isoString) {
-    return dateStr(new Date(isoString));
+    return dateStr(operationalDate(new Date(isoString)));
   }
 
   function mondayOf(d) {
@@ -243,7 +248,7 @@
 
   // Resolves the selected weekday to a concrete date within the current Sun–Sat week.
   function dateForDayKey(dayKey) {
-    var now = new Date();
+    var now = operationalDate(new Date());
     var diff = DAY_KEYS.indexOf(dayKey) - now.getDay();
     var d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diff);
     return d;
