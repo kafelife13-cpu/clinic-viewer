@@ -1276,7 +1276,11 @@
   setTimeout(function () {
     loadRosterFromCloud().then(importApprovedKingRequests).catch(importApprovedKingRequests);
   }, 500);
-  setInterval(importApprovedKingRequests, 60000);
+  // 교사 화면에서 수요일 3시/5시를 전환하면 패드도 늦어도 10초 안에 새 명단을 받는다.
+  setInterval(importApprovedKingRequests, 10000);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) importApprovedKingRequests();
+  });
 
   document.getElementById('sbRetryBtn').addEventListener('click', retryPendingSync);
   window.addEventListener('online', function () { setTimeout(retryPendingSync, 500); });
