@@ -566,6 +566,13 @@
 
   if (cfg) { showMain(); fetchData(false); } else { showSetup(); }
   setInterval(function () { if (cfg) fetchData(false); }, 10000);
+  // 핸드폰에서 다른 앱을 보고 돌아오거나 화면을 다시 열면 즉시 최신 명단을 반영한다.
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && cfg) fetchData(false);
+  });
+  window.addEventListener('pageshow', function () {
+    if (cfg) fetchData(false);
+  });
 })();
 </script>
 </body>
