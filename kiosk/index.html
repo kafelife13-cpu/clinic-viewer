@@ -782,9 +782,10 @@
     var wKey = dayKeyOf(dateObj);
     document.getElementById('attDayLabel').textContent = DAY_LABELS[wKey] + '요일';
 
-    var selWeek = mondayStr(dateObj);
     var dayAttendance = state.attendance.filter(function (a) { return a.date === dateVal; });
-    var expected = state.students.filter(function (s) { return s.days.indexOf(wKey) !== -1 && (!s.weekStart || s.weekStart === selWeek); });
+    // 클리닉 시간은 새 신청이 들어오기 전까지 다음 주에도 그대로 유지한다.
+    // weekStart가 지난주라는 이유로 학생을 명단에서 숨기지 않는다.
+    var expected = state.students.filter(function (s) { return s.days.indexOf(wKey) !== -1; });
 
     var tbody = document.getElementById('attTableBody');
     tbody.innerHTML = '';
@@ -1211,6 +1212,15 @@
       })
       .then(function (rows) {
         if (!Array.isArray(rows) || rows.length === 0) return false;
+        // 같은 학생의 지난 주 명단이 여러 건 남아 있으면 가장 최근 설정만 사용한다.
+        // week_start가 없는 행은 교사가 직접 지정한 현재 고정 일정이므로 우선한다.
+        var latestByName = {};
+        rows.forEach(function (row) {
+          var key = (row.student_name || '').replace(/\s/g, '');
+          var old = latestByName[key];
+          if (!old || !row.week_start || (old.week_start && row.week_start > old.week_start)) latestByName[key] = row;
+        });
+        rows = Object.keys(latestByName).map(function (key) { return latestByName[key]; });
         var previous = state.students || [];
         state.students = rows.map(function (row) {
           var phoneVal = String(row.id || '').split('-')[0];

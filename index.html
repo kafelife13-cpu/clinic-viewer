@@ -359,9 +359,9 @@
     var t = dateStr(targetDate);
     var isToday = t === todayStr();
     var dateLabel = (targetDate.getMonth()+1) + '월 ' + targetDate.getDate() + '일';
-    var targetWeek = mondayStr(targetDate);
     var attendance = lastRows.filter(function (r) { return r.checked_in_at && localDateStr(r.checked_in_at) === t; });
-    var expected = lastStudents.filter(function (s) { return (s.days || []).indexOf(wKey) !== -1 && (!s.week_start || s.week_start === targetWeek); });
+    // 한 번 지정된 클리닉 일정은 다음 신청 전까지 계속 적용한다.
+    var expected = lastStudents.filter(function (s) { return (s.days || []).indexOf(wKey) !== -1; });
 
     var extra = attendance.filter(function (a) {
       return !expected.some(function (s) { return attendanceMatchesStudent(a, s); });
@@ -518,6 +518,7 @@
     }
     Promise.all([
       getJson('clinic_attendance?select=*&order=checked_in_at.desc&limit=200'),
+      getJson('clinic_students?select=id,student_name,class_name,time_slot,days,week_start&limit=1000'),
       getKingJson('clinic_requests?select=*&status=eq.confirmed&order=created_at.desc'),
       getKingJson('clinic_slots?select=*'),
       getKingJson('users?select=id,name,school_id,status,role'),
@@ -528,13 +529,13 @@
         showMain();
       }
       lastRows = results[0]||[];
-      var requests = results[1], slots = results[2], users = results[3], schools = results[4];
+      var rosterRows = results[1] || [], requests = results[2], slots = results[3], users = results[4], schools = results[5];
       var latestByStudent = {};
       requests.forEach(function (req) {
         if (!latestByStudent[req.student_id]) latestByStudent[req.student_id] = req;
       });
       var dayToKey = {'일':'sun','월':'mon','화':'tue','수':'wed','목':'thu','금':'fri','토':'sat'};
-      lastStudents = Object.keys(latestByStudent).map(function (studentId) {
+      var kingStudents = Object.keys(latestByStudent).map(function (studentId) {
         var req = latestByStudent[studentId];
         var slot = slots.find(function (s) { return s.id === req.slot_id; });
         var user = users.find(function (u) { return u.id === studentId; });
@@ -550,6 +551,19 @@
           week_start: null
         };
       }).filter(Boolean);
+      // 출결 패드는 출결용 명단을 기준으로 표시한다. 같은 이름의 과거 주차가
+      // 여러 건이면 교사 고정 일정(week_start 없음), 아니면 가장 최근 주차를 쓴다.
+      var latestRosterByName = {};
+      rosterRows.forEach(function (row) {
+        var key = normalizedStudentName(row.student_name);
+        var old = latestRosterByName[key];
+        if (!old || !row.week_start || (old.week_start && row.week_start > old.week_start)) latestRosterByName[key] = row;
+      });
+      lastStudents = Object.keys(latestRosterByName).map(function (key) { return latestRosterByName[key]; });
+      kingStudents.forEach(function (student) {
+        var key = normalizedStudentName(student.student_name);
+        if (!latestRosterByName[key]) lastStudents.push(student);
+      });
       render();
       var now = new Date();
       document.getElementById('lastUpdated').textContent = '마지막 갱신: ' + ('0'+now.getHours()).slice(-2) + ':' + ('0'+now.getMinutes()).slice(-2) + ':' + ('0'+now.getSeconds()).slice(-2);
