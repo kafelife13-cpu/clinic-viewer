@@ -1134,6 +1134,16 @@
     return code;
   }
 
+  function attendanceCodeForUser(user, used) {
+    var phoneDigits = digitsOnly(user && user.parent_phone || '');
+    var pwDigits = digitsOnly(user && user.pw || '');
+    var preferred = phoneDigits.length >= 4 ? phoneDigits.slice(-4) : (pwDigits.length >= 4 ? pwDigits.slice(-4) : '');
+    if (preferred && !used[preferred]) { used[preferred] = true; return preferred; }
+    var fallback = kingStudentCode(user && user.id, used);
+    used[fallback] = true;
+    return fallback;
+  }
+
   function importApprovedKingRequests() {
     var statusEl = document.getElementById('sbRosterStatus');
     statusEl.textContent = '국어왕 승인 내역을 확인하는 중...';
@@ -1142,7 +1152,7 @@
     return Promise.all([
       fetch(base+'/rest/v1/clinic_requests?select=*&status=eq.confirmed',{headers:headers}),
       fetch(base+'/rest/v1/clinic_slots?select=*',{headers:headers}),
-      fetch(base+'/rest/v1/users?select=id,name,role,status,school_id',{headers:headers}),
+      fetch(base+'/rest/v1/users?select=id,name,role,status,school_id,pw,parent_phone',{headers:headers}),
       fetch(base+'/rest/v1/qa_schools?select=id,name',{headers:headers})
     ]).then(function(responses){
       for(var i=0;i<responses.length;i++)if(!responses[i].ok)throw new Error('데이터 조회 실패 ('+responses[i].status+')');
@@ -1154,13 +1164,15 @@
         if(s.name==='윤형진'||s.name==='박시우'||s.name==='최은서')return false;
         return true;
       });
-      var used={};state.students.forEach(function(s){if(s.phone)used[s.phone]=true;});
-      users.filter(function(u){return u.role==='student'&&u.status==='active';}).forEach(function(user){
+      var activeUsers=users.filter(function(u){return u.role==='student'&&u.status==='active';});
+      var used={}, codeByUser={};
+      activeUsers.forEach(function(user){codeByUser[user.id]=attendanceCodeForUser(user,used);});
+      activeUsers.forEach(function(user){
         var linked=state.students.find(function(s){return s.kingStudentId===user.id;});
-        if(linked)return;
+        if(linked){linked.phone=codeByUser[user.id];return;}
         var same=state.students.filter(function(s){return (s.name||'').replace(/\s/g,'')===(user.name||'').replace(/\s/g,'');});
-        if(same.length===1){same[0].kingStudentId=user.id;return;}
-        var code=kingStudentCode(user.id,used);used[code]=true;
+        if(same.length===1){same[0].kingStudentId=user.id;same[0].phone=codeByUser[user.id];return;}
+        var code=codeByUser[user.id];
         var school=schools.find(function(s){return s.id===user.school_id;});
         state.students.push({id:uid(),name:user.name,phone:code,days:[],cls:school?school.name:'국어왕',time:'',weekStart:'',kingStudentId:user.id,temporaryCode:true});
         added++;
