@@ -1174,7 +1174,7 @@
       var requests=data[0]||[], slots=data[1]||[], users=data[2]||[], schools=data[3]||[];
       var updated=0, added=0, unmatched=[];
       state.students=state.students.filter(function(s){
-        if(s.name==='윤형진'||s.name==='박시우'||s.name==='최은서')return false;
+        if(['윤형진','박시우','최은서','김세빈1','김보은','박서연','박제희'].indexOf(s.name)!==-1)return false;
         return true;
       });
       var activeUsers=users.filter(function(u){return u.role==='student'&&u.status==='active';}).sort(function(a,b){
