@@ -456,7 +456,11 @@
   function findActiveStudent(phoneVal) {
     var candidates = state.students.filter(function (s) { return s.phone === phoneVal; });
     if (candidates.length === 0) return null;
-    if (candidates.length === 1) return candidates[0];
+    // 번호가 바뀐 학생은 입력한 기존 번호로 이름을 확인한 뒤, 같은 이름의
+    // 모든 기록에서 최신 일정을 찾는다. (예: 김도양 6121 → 최신 금요일 일정)
+    var names = {};
+    candidates.forEach(function (s) { names[(s.name || '').replace(/\s/g, '')] = true; });
+    candidates = state.students.filter(function (s) { return names[(s.name || '').replace(/\s/g, '')]; });
     var opNow = operationalDate(new Date());
     var wKey = dayKeyOf(opNow);
     function newest(rows) {
