@@ -452,18 +452,21 @@
     return (m.getMonth()+1) + '/' + m.getDate() + '주~';
   }
 
-  // When a phone code has entries from multiple weeks, prefer the one matching the current week.
+  // 기존 출결번호가 바뀌었더라도 그 번호의 가장 최근 일정을 계속 사용할 수 있어야 한다.
   function findActiveStudent(phoneVal) {
     var candidates = state.students.filter(function (s) { return s.phone === phoneVal; });
     if (candidates.length === 0) return null;
     if (candidates.length === 1) return candidates[0];
     var opNow = operationalDate(new Date());
-    var curWeek = mondayStr(opNow);
     var wKey = dayKeyOf(opNow);
-    var best = candidates.find(function (s) { return (!s.weekStart || s.weekStart === curWeek) && s.days.indexOf(wKey) !== -1; });
-    if (best) return best;
-    best = candidates.find(function (s) { return !s.weekStart || s.weekStart === curWeek; });
-    return best || candidates[candidates.length - 1];
+    function newest(rows) {
+      return rows.slice().sort(function (a, b) {
+        if (!a.weekStart && b.weekStart) return -1;
+        if (a.weekStart && !b.weekStart) return 1;
+        return String(b.weekStart || '').localeCompare(String(a.weekStart || ''));
+      })[0] || null;
+    }
+    return newest(candidates.filter(function (s) { return s.days.indexOf(wKey) !== -1; })) || newest(candidates);
   }
 
   // ---------------- KIOSK ----------------
@@ -785,7 +788,13 @@
     var dayAttendance = state.attendance.filter(function (a) { return a.date === dateVal; });
     // 클리닉 시간은 새 신청이 들어오기 전까지 다음 주에도 그대로 유지한다.
     // weekStart가 지난주라는 이유로 학생을 명단에서 숨기지 않는다.
-    var expected = state.students.filter(function (s) { return s.days.indexOf(wKey) !== -1; });
+    var expectedByName = {};
+    state.students.filter(function (s) { return s.days.indexOf(wKey) !== -1; }).forEach(function (s) {
+      var key = (s.name || '').replace(/\s/g, '');
+      var old = expectedByName[key];
+      if (!old || !s.weekStart || (old.weekStart && s.weekStart > old.weekStart)) expectedByName[key] = s;
+    });
+    var expected = Object.keys(expectedByName).map(function (key) { return expectedByName[key]; });
 
     var tbody = document.getElementById('attTableBody');
     tbody.innerHTML = '';
@@ -1212,15 +1221,7 @@
       })
       .then(function (rows) {
         if (!Array.isArray(rows) || rows.length === 0) return false;
-        // 같은 학생의 지난 주 명단이 여러 건 남아 있으면 가장 최근 설정만 사용한다.
-        // week_start가 없는 행은 교사가 직접 지정한 현재 고정 일정이므로 우선한다.
-        var latestByName = {};
-        rows.forEach(function (row) {
-          var key = (row.student_name || '').replace(/\s/g, '');
-          var old = latestByName[key];
-          if (!old || !row.week_start || (old.week_start && row.week_start > old.week_start)) latestByName[key] = row;
-        });
-        rows = Object.keys(latestByName).map(function (key) { return latestByName[key]; });
+        // 과거에 사용하던 출결번호도 계속 인식해야 하므로 원본 행은 유지한다.
         var previous = state.students || [];
         state.students = rows.map(function (row) {
           var phoneVal = String(row.id || '').split('-')[0];
