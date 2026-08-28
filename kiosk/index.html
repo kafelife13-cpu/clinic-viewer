@@ -900,7 +900,7 @@
   function deleteAttendanceFromCloud(student, dateVal) {
     if (!state.sbUrl || !state.sbKey) return;
     var range = utcRangeForLocalDate(dateVal);
-    var sid = student.phone + '-' + (student.weekStart || 'none');
+    var sid = cloudAttendanceStudentId(student);
     var url = state.sbUrl.replace(/\/+$/, '') + '/rest/v1/clinic_attendance?student_id=eq.' + encodeURIComponent(sid) +
       '&checked_in_at=gte.' + encodeURIComponent(range.start) + '&checked_in_at=lt.' + encodeURIComponent(range.end);
     fetch(url, {
@@ -933,7 +933,7 @@
         'Prefer': 'return=minimal'
       },
       body: JSON.stringify({
-        student_id: student.phone + '-' + (student.weekStart || 'none'),
+        student_id: cloudAttendanceStudentId(student),
         student_name: student.name,
         class_name: student.cls || null,
         day_label: DAY_LABELS[wKey],
@@ -1112,21 +1112,27 @@
       byId[row.id] = row;
     });
     var rows = Object.keys(byId).map(function (id) { return byId[id]; });
-    // 전체 명단을 지우지 않는다. 열린 구버전 패드 하나가 다른 패드의 최신
-    // 명단을 삭제하는 문제가 생기므로, 클라우드에 없는 행만 안전하게 추가한다.
-    return fetch(base + '/rest/v1/clinic_students?select=id&limit=1000', { headers: headers })
+    // 김까까 활성 학생을 기준으로 항상 같은 명단을 만든다. 과거 전화번호/주차로
+    // 생긴 중복 행은 최신 명단을 올린 뒤 제거해 패드와 휴대폰이 같은 학생을 본다.
+    return fetch(base + '/rest/v1/clinic_students?select=*&limit=1000', { headers: headers })
       .then(function (res) {
         if (!res.ok) return res.text().then(function (t) { throw new Error(t); });
         return res.json();
       }).then(function (existing) {
-        var ids = {};
-        (existing || []).forEach(function (row) { ids[row.id] = true; });
-        var missing = rows.filter(function (row) { return !ids[row.id]; });
-        if (!missing.length) return;
-        return fetch(base + '/rest/v1/clinic_students', { method: 'POST', headers: headers, body: JSON.stringify(missing) })
-          .then(function (res2) {
-            if (!res2.ok) return res2.text().then(function (t) { throw new Error(t); });
-          });
+        existing=existing||[];
+        var oldById={};existing.forEach(function(row){oldById[row.id]=row;});
+        function sameRow(a,b){return a&&a.student_name===b.student_name&&(a.class_name||null)===(b.class_name||null)&&(a.time_slot||null)===(b.time_slot||null)&&JSON.stringify(a.days||[])===JSON.stringify(b.days||[])&&(a.week_start||null)===(b.week_start||null);}
+        var replace=rows.filter(function(row){return oldById[row.id]&&!sameRow(oldById[row.id],row);});
+        var keep={};rows.forEach(function(row){keep[row.id]=true;});
+        var stale=existing.filter(function(row){return !keep[row.id];});
+        var remove=stale.concat(replace.map(function(row){return oldById[row.id];}));
+        return Promise.all(remove.map(function(row){
+          return fetch(base+'/rest/v1/clinic_students?id=eq.'+encodeURIComponent(row.id),{method:'DELETE',headers:headers}).then(function(r){if(!r.ok)return r.text().then(function(t){throw new Error(t);});});
+        })).then(function(){
+          var add=rows.filter(function(row){return !oldById[row.id]||replace.some(function(x){return x.id===row.id;});});
+          if(!add.length)return {saved:rows.length,removed:remove.length};
+          return fetch(base+'/rest/v1/clinic_students',{method:'POST',headers:headers,body:JSON.stringify(add)}).then(function(r){if(!r.ok)return r.text().then(function(t){throw new Error(t);});return {saved:rows.length,removed:remove.length};});
+        });
       });
   }
 
@@ -1218,6 +1224,19 @@
           unmatched.push(user.name||user.id);
         }
       });
+      // 한 학생이 과거 번호/주차로 여러 줄 남아도 김까까 사용자 ID별 한 줄만 유지한다.
+      var canonical=[];
+      activeUsers.forEach(function(user){
+        var matches=state.students.filter(function(s){return s.kingStudentId===user.id;});
+        if(!matches.length)matches=state.students.filter(function(s){return (s.name||'').replace(/\s/g,'')===(user.name||'').replace(/\s/g,'');});
+        var student=matches.find(function(s){return s.kingSlotId;})||matches[0];
+        if(!student)return;
+        student.kingStudentId=user.id;
+        student.name=user.name;
+        student.phone=codeByUser[user.id];
+        canonical.push(student);
+      });
+      state.students=canonical;
       saveData();renderStudentTable();refreshAttendancePanel();
       syncTodayAttendanceToKing();
       var msg='✅ 국어왕 학생 전체 연동 완료: 새 학생 '+added+'명, 시간 반영 '+updated+'명';
@@ -1238,6 +1257,10 @@
   function phoneConnectionLink(){
     var base=location.href.replace(/\/kiosk\/.*$/,'/');
     return base+'#u='+encodeURIComponent(state.sbUrl)+'&k='+encodeURIComponent(state.sbKey);
+  }
+
+  function cloudAttendanceStudentId(student){
+    return student&&student.kingStudentId ? String(student.kingStudentId) : student.phone+'-'+(student.weekStart||'none');
   }
 
   // 패드의 브라우저 저장값이 지워져도 클라우드의 학생 명단을 먼저 복구한다.
