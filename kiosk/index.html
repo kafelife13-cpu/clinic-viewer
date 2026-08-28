@@ -1137,7 +1137,9 @@
   function attendanceCodeForUser(user, used) {
     var phoneDigits = digitsOnly(user && user.parent_phone || '');
     var pwDigits = digitsOnly(user && user.pw || '');
-    var preferred = phoneDigits.length >= 4 ? phoneDigits.slice(-4) : (pwDigits.length >= 4 ? pwDigits.slice(-4) : '');
+    // 학생들은 국어왕 비밀번호(학생 전화번호 뒷자리)를 입력한다.
+    // parent_phone은 학부모 번호일 수 있으므로 비밀번호를 최우선으로 사용한다.
+    var preferred = pwDigits.length >= 4 ? pwDigits.slice(-4) : (phoneDigits.length >= 4 ? phoneDigits.slice(-4) : '');
     if (preferred && !used[preferred]) { used[preferred] = true; return preferred; }
     var fallback = kingStudentCode(user && user.id, used);
     used[fallback] = true;
@@ -1164,7 +1166,9 @@
         if(s.name==='윤형진'||s.name==='박시우'||s.name==='최은서')return false;
         return true;
       });
-      var activeUsers=users.filter(function(u){return u.role==='student'&&u.status==='active';});
+      var activeUsers=users.filter(function(u){return u.role==='student'&&u.status==='active';}).sort(function(a,b){
+        return (a.name||'').localeCompare(b.name||'','ko');
+      });
       var used={}, codeByUser={};
       activeUsers.forEach(function(user){codeByUser[user.id]=attendanceCodeForUser(user,used);});
       activeUsers.forEach(function(user){
