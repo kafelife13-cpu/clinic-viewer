@@ -274,6 +274,14 @@
             <tbody id="extraTableBody"></tbody>
           </table>
         </div>
+        <div class="card">
+          <h2>미등록 번호 입력 기록</h2>
+          <div class="muted-small" style="margin-bottom:8px;">학생 명단에서 찾지 못한 번호도 입력 시각과 함께 자동 저장됩니다.</div>
+          <table>
+            <thead><tr><th>입력 시각</th><th>입력 번호</th><th>클라우드 저장</th></tr></thead>
+            <tbody id="unknownAttemptTableBody"></tbody>
+          </table>
+        </div>
       </div>
 
       <!-- Settings panel -->
@@ -410,6 +418,7 @@
   if (!state.tgToken) state.tgToken = '';
   if (!state.tgChatId) state.tgChatId = '';
   if (!state.noShowAlerted) state.noShowAlerted = {};
+  if (!state.unknownAttempts) state.unknownAttempts = [];
 
   function digitsOnly(s) { return (s || '').replace(/\D/g, ''); }
   function formatPhone(d) { return d; }
@@ -531,6 +540,7 @@
     }
     var student = findActiveStudent(d);
     if (!student) {
+      recordUnknownAttempt(d);
       showResult('err', '❓', '', '등록되지 않은 번호입니다\n관리자에게 문의해주세요');
       return;
     }
@@ -847,6 +857,40 @@
     if (extra.length === 0) {
       extraBody.innerHTML = '<tr><td colspan="4" style="color:var(--muted)">없음</td></tr>';
     }
+
+    var unknownBody = document.getElementById('unknownAttemptTableBody');
+    if (unknownBody) {
+      var unknown = (state.unknownAttempts || []).filter(function (a) { return a.date === dateVal; });
+      unknownBody.innerHTML = unknown.map(function (a) {
+        return '<tr><td>' + escapeHtml(a.time || '') + '</td><td style="font-weight:800">' + escapeHtml(a.code || '') + '</td><td>' +
+          (a.cloudSynced && a.kingSynced ? '<span class="pill pill-ok">저장 완료</span>' : '<span class="pill pill-no">전송 대기</span>') + '</td></tr>';
+      }).join('') || '<tr><td colspan="3" style="color:var(--muted)">없음</td></tr>';
+    }
+  }
+
+  function recordUnknownAttempt(code) {
+    var now = new Date(), opNow = operationalDate(now);
+    var attempt = {id:uid(),code:code,date:todayKey(opNow),day:dayKeyOf(opNow),time:('0'+now.getHours()).slice(-2)+':'+('0'+now.getMinutes()).slice(-2),iso:now.toISOString(),cloudSynced:false,kingSynced:false};
+    state.unknownAttempts.unshift(attempt);
+    if (state.unknownAttempts.length > 300) state.unknownAttempts.length = 300;
+    saveData();
+    syncUnknownAttempt(attempt);
+    if (adminOpen) refreshAttendancePanel();
+  }
+
+  function syncUnknownAttempt(attempt) {
+    if (!attempt || !navigator.onLine) return Promise.resolve(false);
+    var label = '미등록 번호 ' + attempt.code;
+    var payload = {student_id:'unknown_'+attempt.id,student_name:label,class_name:'미등록 번호 입력',day_label:DAY_LABELS[attempt.day],time_slot:'입력번호 '+attempt.code,checked_in_at:attempt.iso};
+    var jobs=[];
+    if (!attempt.cloudSynced && state.sbUrl && state.sbKey) {
+      jobs.push(fetch(state.sbUrl.replace(/\/+$/, '')+'/rest/v1/clinic_attendance',{method:'POST',headers:{'apikey':state.sbKey,'Authorization':'Bearer '+state.sbKey,'Content-Type':'application/json','Prefer':'return=minimal'},body:JSON.stringify(payload)}).then(function(res){attempt.cloudSynced=res.ok;return res.ok;}).catch(function(){return false;}));
+    }
+    if (!attempt.kingSynced) {
+      var kingPayload={id:'att_unknown_'+String(attempt.id).replace(/[^a-zA-Z0-9_-]/g,'_'),student_id:payload.student_id,student_name:payload.student_name,class_name:payload.class_name,day_label:payload.day_label,time_slot:payload.time_slot,checked_in_at:payload.checked_in_at};
+      jobs.push(fetch(KING_SB_URL+'/rest/v1/clinic_attendance?on_conflict=id',{method:'POST',headers:{'apikey':KING_SB_KEY,'Authorization':'Bearer '+KING_SB_KEY,'Content-Type':'application/json','Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(kingPayload)}).then(function(res){attempt.kingSynced=res.ok;return res.ok;}).catch(function(){return false;}));
+    }
+    return Promise.all(jobs).then(function(result){saveData();if(adminOpen)refreshAttendancePanel();logSync({student:label,ok:attempt.cloudSynced&&attempt.kingSynced,status:attempt.cloudSynced&&attempt.kingSynced?201:0,detail:'미등록 번호 입력 기록'});return result.length?result.every(Boolean):true;});
   }
 
   function toggleAttendance(studentId, dateVal, wKey) {
@@ -982,12 +1026,13 @@
   function retryPendingSync() {
     if (!state.sbUrl || !state.sbKey || !navigator.onLine) return;
     var pending = state.attendance.filter(function (a) { return !a.synced; });
+    var unknownPending = (state.unknownAttempts || []).filter(function (a) { return !a.cloudSynced || !a.kingSynced; });
     var statusEl = document.getElementById('sbRetryStatus');
-    if (pending.length === 0) {
+    if (pending.length === 0 && unknownPending.length === 0) {
       if (statusEl) statusEl.textContent = '밀린 기록 없음 (전부 전송 완료)';
       return;
     }
-    if (statusEl) statusEl.textContent = pending.length + '건 재전송 중...';
+    if (statusEl) statusEl.textContent = (pending.length + unknownPending.length) + '건 재전송 중...';
     var results = pending.map(function (a) {
       var student = state.students.find(function (s) { return s.id === a.studentId; });
       if (!student) return Promise.resolve(false);
@@ -999,9 +1044,10 @@
       }
       return syncAttendanceToCloud(student, a.day, a.time, a.id, isoWhen);
     });
+    unknownPending.forEach(function (a) { results.push(syncUnknownAttempt(a)); });
     Promise.all(results).then(function (oks) {
       var successCount = oks.filter(function (x) { return x; }).length;
-      if (statusEl) statusEl.textContent = pending.length + '건 중 ' + successCount + '건 성공';
+      if (statusEl) statusEl.textContent = (pending.length + unknownPending.length) + '건 중 ' + successCount + '건 성공';
       refreshAttendancePanel();
     });
   }
