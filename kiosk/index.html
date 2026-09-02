@@ -157,6 +157,7 @@
   .pin-box input { width: 100%; text-align: center; font-size: 22px; letter-spacing: 6px; padding: 12px; margin-bottom: 12px; }
   .muted-small { color: var(--muted); font-size: 12px; margin-top: 6px; }
 </style>
+<script src="../class-attendance.js"></script>
 </head>
 <body>
 <div id="app">
@@ -165,7 +166,7 @@
   <div id="kiosk">
     <div class="kiosk-header">
       <div>
-        <div class="clinic-title">📋 클리닉 출석 체크</div>
+        <div class="clinic-title">📋 수업·클리닉 출석 체크</div>
         <div class="date-badge" id="todayLabel"></div>
         <div class="sync-badge" id="syncBadge"></div>
       </div>
@@ -175,6 +176,7 @@
       </div>
     </div>
 
+    <label style="display:block;margin:16px 0;font-size:17px;font-weight:700">출석 종류 <select id="classMode" style="font:inherit;padding:10px;border-radius:10px"><option value="clinic">클리닉</option><option value="wednesday">수요일 수업</option><option value="weekend">주말 수업</option></select></label>
     <div class="phone-display placeholder" id="phoneDisplay">전화번호 뒷자리 4자리</div>
     <div class="keypad" id="keypad">
       <button class="key" data-k="1">1</button>
@@ -282,6 +284,7 @@
             <tbody id="unknownAttemptTableBody"></tbody>
           </table>
         </div>
+<div class="card"><h2>수요일·주말 수업 출결</h2><p id="classAttSummary"></p><table><thead><tr><th>학생</th><th>수업</th><th>출결</th><th>체크인 시각</th><th>처리</th></tr></thead><tbody id="classAttBody"></tbody></table></div>
       </div>
 
       <!-- Settings panel -->
@@ -532,6 +535,61 @@
     }, 2600);
   }
 
+  // Regular lessons have their own records; never reuse clinic check-ins.
+  var classMode=state.classMode||'clinic',classCheckInBusy=false,classPanelRun=0,classTeacherPin='';
+  var classModeEl=document.getElementById('classMode');
+  classModeEl.value=classMode;
+  classModeEl.addEventListener('change',function(){classMode=this.value;state.classMode=classMode;saveData();phone='';renderPhone();});
+  function classRpc(name,payload){
+    if(!state.sbUrl||!state.sbKey)return Promise.reject(new Error('출결 서버 연결을 먼저 설정해 주세요.'));
+    return fetch(state.sbUrl.replace(/\/+$/,'')+'/rest/v1/rpc/'+name,{method:'POST',headers:{apikey:state.sbKey,'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json().then(function(data){if(!r.ok)throw new Error(data.message||'출결 저장 실패');return data;});});
+  }
+  function syncClassRecord(record){
+    return classRpc('check_in_class',{p_student_id:record.student_id,p_student_name:record.student_name,p_class_id:record.class_id,p_checked_in_at:record.checked_in_at}).then(function(data){record.synced=true;record.error='';saveData();return data;}).catch(function(e){record.error=e.message;saveData();throw e;});
+  }
+  async function checkInRegularClass(student){
+    if(classCheckInBusy)return;
+    var cls=ClassAttendance.find(student.classId),date=ClassAttendance.dateKey();
+    if(!cls||!student.kingStudentId){showResult('err','⚠️',student.name,'수업 반이 배정되지 않았습니다. 선생님께 확인해 주세요.');return;}
+    if(cls.kind!==classMode||cls.day!==ClassAttendance.dayKey(date)){showResult('warn','📅',student.name,cls.label+' 수업 학생입니다.\n출석 종류와 수업 요일을 확인해 주세요.');return;}
+    classCheckInBusy=true;
+    var records=state.classAttendance||(state.classAttendance=[]);
+    var record=records.find(function(r){return r.student_id===student.kingStudentId&&r.class_id===cls.id&&r.lesson_date===date;});
+    if(!record){record={student_id:student.kingStudentId,student_name:student.name,class_id:cls.id,lesson_date:date,checked_in_at:new Date().toISOString(),synced:false};records.push(record);saveData();}
+    try{var saved=await syncClassRecord(record);showResult('ok','✅',student.name+'님',cls.label+'\n수업 출석이 확인되었습니다 ('+new Date(saved.checked_in_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})+')');}
+    catch(e){showResult('warn','☁️',student.name+'님','수업 출석 전송 대기\n'+e.message+'\n연결이 돌아오면 다시 전송합니다.');}
+    finally{classCheckInBusy=false;renderClassPanel();}
+  }
+  function retryClassAttendance(){
+    if(!navigator.onLine)return;
+    (state.classAttendance||[]).filter(function(r){return !r.synced;}).reduce(function(p,r){return p.then(function(){return syncClassRecord(r).catch(function(){});});},Promise.resolve());
+  }
+  async function renderClassPanel(){
+    var body=document.getElementById('classAttBody'),summary=document.getElementById('classAttSummary');if(!body||!adminOpen)return;
+    var run=++classPanelRun,date=document.getElementById('attDate').value||ClassAttendance.dateKey();
+    try{
+      if(!classTeacherPin){summary.innerHTML='<button class="btn btn-ghost" id="unlockClassAttendance">교사 PIN으로 출결 열기</button>';body.innerHTML='';document.getElementById('unlockClassAttendance').onclick=function(){classTeacherPin=prompt('출결 조회용 교사 PIN을 입력하세요.')||'';if(classTeacherPin)renderClassPanel();};return;}
+      var records=await classRpc('teacher_read_attendance',{p_pin:classTeacherPin,p_kind:'class',p_start:date+'T00:00:00+09:00',p_end:date+'T23:59:59.999+09:00'});if(run!==classPanelRun)return;
+      var students=state.students.filter(function(s){var c=ClassAttendance.find(s.classId);return s.kingStudentId&&c&&c.day===ClassAttendance.dayKey(date);});
+      students.sort(function(a,b){return ClassAttendance.find(a.classId).start.localeCompare(ClassAttendance.find(b.classId).start)||a.name.localeCompare(b.name,'ko');});
+      var count=0;
+      body.innerHTML=students.map(function(s){var c=ClassAttendance.find(s.classId),r=records.find(function(a){return ClassAttendance.matches(a,s.kingStudentId,c.id,date);}),status=ClassAttendance.status(r,c,date);if(r)count++;return '<tr><td>'+escapeHtml(s.name)+'</td><td>'+c.label+'</td><td>'+status.label+'</td><td>'+(r?new Date(r.checked_in_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}):'—')+'</td><td><button class="btn btn-ghost" data-class-id="'+escapeHtml(s.id)+'" data-action="'+(r?'cancel':'present')+'"'+(date>ClassAttendance.dateKey()?' disabled':'')+'>'+(r?'출석 취소':'출석 처리')+'</button></td></tr>';}).join('')||'<tr><td colspan="5">해당 날짜의 수업이 없습니다.</td></tr>';
+      summary.textContent=date+' · '+count+' / '+students.length+'명 출석 · 전송 대기 '+(state.classAttendance||[]).filter(function(r){return !r.synced;}).length+'건';
+    }catch(e){if(run===classPanelRun){summary.textContent='수업 출결 조회 실패 — 새로고침해 주세요.';body.innerHTML='';}}
+  }
+  document.getElementById('classAttBody').addEventListener('click',async function(e){
+    var b=e.target.closest('[data-class-id]');if(!b||b.disabled)return;
+    var student=state.students.find(function(s){return s.id===b.dataset.classId;}),date=document.getElementById('attDate').value,action=b.dataset.action;if(!student)return;
+    if(!confirm(student.name+' · '+date+' 수업 '+(action==='cancel'?'출석을 취소할까요?':'출석 처리할까요?')))return;
+    if(!classTeacherPin){classTeacherPin=prompt('출결 서버의 교사 PIN을 입력하세요.')||'';if(!classTeacherPin)return;}
+    b.disabled=true;
+    try{await classRpc('teacher_edit_class_attendance',{p_pin:classTeacherPin,p_action:action,p_student_id:student.kingStudentId,p_student_name:student.name,p_class_id:student.classId,p_lesson_date:date});if(action==='cancel'){(state.classAttendance||[]).filter(function(r){return r.student_id===student.kingStudentId&&r.class_id===student.classId&&r.lesson_date===date;}).forEach(function(r){r.synced=true;});saveData();}await renderClassPanel();}
+    catch(error){if(error.message.includes('invalid teacher pin'))classTeacherPin='';alert('출결 저장 실패: '+error.message);b.disabled=false;}
+  });
+  setInterval(function(){if(!document.hidden)renderClassPanel();retryClassAttendance();},10000);
+  window.addEventListener('online',retryClassAttendance);
+
+
   document.getElementById('confirmBtn').addEventListener('click', function () {
     var d = digitsOnly(phone);
     if (d.length !== 4) {
@@ -540,10 +598,11 @@
     }
     var student = findActiveStudent(d);
     if (!student) {
-      recordUnknownAttempt(d);
+      if(classMode==='clinic')recordUnknownAttempt(d);
       showResult('err', '❓', '', '등록되지 않은 번호입니다\n관리자에게 문의해주세요');
       return;
     }
+    if(classMode!=='clinic'){checkInRegularClass(student);return;}
     var now = new Date();
     var opNow = operationalDate(now);
     var dKey = todayKey(opNow);
@@ -793,6 +852,7 @@
   attDateInput.addEventListener('change', refreshAttendancePanel);
 
   function refreshAttendancePanel() {
+    renderClassPanel();
     var dateVal = attDateInput.value || todayKey(operationalDate(new Date()));
     var parts = dateVal.split('-').map(Number);
     var dateObj = new Date(parts[0], parts[1]-1, parts[2]);
@@ -1217,7 +1277,7 @@
     return Promise.all([
       fetch(base+'/rest/v1/clinic_requests?select=*&status=eq.confirmed',{headers:headers}),
       fetch(base+'/rest/v1/clinic_slots?select=*',{headers:headers}),
-      fetch(base+'/rest/v1/users?select=id,name,role,status,school_id,pw,parent_phone',{headers:headers}),
+      fetch(base+'/rest/v1/users?select=id,name,role,status,school_id,group_id,pw,parent_phone',{headers:headers}),
       fetch(base+'/rest/v1/qa_schools?select=id,name',{headers:headers})
     ]).then(function(responses){
       for(var i=0;i<responses.length;i++)if(!responses[i].ok)throw new Error('데이터 조회 실패 ('+responses[i].status+')');
@@ -1279,6 +1339,7 @@
         if(!student)return;
         student.kingStudentId=user.id;
         student.name=user.name;
+        student.classId=user.group_id||null;
         student.phone=codeByUser[user.id];
         canonical.push(student);
       });
