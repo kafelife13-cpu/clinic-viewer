@@ -256,27 +256,31 @@
       <!-- Attendance panel -->
       <div class="panel" id="panel-attendance">
         <div class="card">
-          <h2>날짜 선택</h2>
+          <h2>본수업 출결 확인</h2>
+<label>확인할 출결 <select id="attendanceViewMode"><option value="lesson">본수업 (수요일·토요일·일요일)</option><option value="clinic">클리닉</option></select></label>
+<div id="lessonDayButtons" style="display:flex;gap:8px;margin:12px 0"><button class="btn btn-ghost" data-lesson-day="wed">수요일</button><button class="btn btn-ghost" data-lesson-day="sat">토요일</button><button class="btn btn-ghost" data-lesson-day="sun">일요일</button></div>
+<label for="attDate">출결 확인 날짜</label>
           <div class="form-row">
             <input type="date" id="attDate">
             <span id="attDayLabel" style="align-self:center; font-weight:700; color:var(--primary-dark);"></span>
           </div>
         </div>
-        <div class="card">
+<div class="card" id="lessonAttendanceCard"><h2>본수업 반별 출결</h2><p id="classAttSummary"></p><table><thead><tr><th>학생</th><th>수업</th><th>출결</th><th>체크인 시각</th><th>처리</th></tr></thead><tbody id="classAttBody"></tbody></table></div>
+        <div class="card" data-clinic-attendance>
           <h2>이날 클리닉 명단 출석 현황</h2>
           <table>
             <thead><tr><th>이름</th><th>전화번호</th><th>반</th><th>시간</th><th>상태</th><th>체크인 시각</th><th></th></tr></thead>
             <tbody id="attTableBody"></tbody>
           </table>
         </div>
-        <div class="card">
+        <div class="card" data-clinic-attendance>
           <h2>명단 외 출석 (다른 요일 학생이 체크인한 경우)</h2>
           <table>
             <thead><tr><th>이름</th><th>전화번호</th><th>반</th><th>체크인 시각</th></tr></thead>
             <tbody id="extraTableBody"></tbody>
           </table>
         </div>
-        <div class="card">
+        <div class="card" data-clinic-attendance>
           <h2>미등록 번호 입력 기록</h2>
           <div class="muted-small" style="margin-bottom:8px;">학생 명단에서 찾지 못한 번호도 입력 시각과 함께 자동 저장됩니다.</div>
           <table>
@@ -284,7 +288,7 @@
             <tbody id="unknownAttemptTableBody"></tbody>
           </table>
         </div>
-<div class="card"><h2>수요일·주말 수업 출결</h2><p id="classAttSummary"></p><table><thead><tr><th>학생</th><th>수업</th><th>출결</th><th>체크인 시각</th><th>처리</th></tr></thead><tbody id="classAttBody"></tbody></table></div>
+
       </div>
 
       <!-- Settings panel -->
@@ -536,7 +540,7 @@
   }
 
   // Regular lessons have their own records; never reuse clinic check-ins.
-  var classMode=state.classMode||'clinic',classCheckInBusy=false,classPanelRun=0,classTeacherPin='';
+  var classMode=state.classMode||(ClassAttendance.dayKey(ClassAttendance.dateKey())==='wed'?'wednesday':'weekend'),classCheckInBusy=false,classPanelRun=0,classTeacherPin='';
   var classModeEl=document.getElementById('classMode');
   classModeEl.value=classMode;
   classModeEl.addEventListener('change',function(){classMode=this.value;state.classMode=classMode;saveData();phone='';renderPhone();});
@@ -565,7 +569,7 @@
     (state.classAttendance||[]).filter(function(r){return !r.synced;}).reduce(function(p,r){return p.then(function(){return syncClassRecord(r).catch(function(){});});},Promise.resolve());
   }
   async function renderClassPanel(){
-    var body=document.getElementById('classAttBody'),summary=document.getElementById('classAttSummary');if(!body||!adminOpen)return;
+    var body=document.getElementById('classAttBody'),summary=document.getElementById('classAttSummary');if(!body||!adminOpen||document.getElementById('attendanceViewMode').value!=='lesson')return;
     var run=++classPanelRun,date=document.getElementById('attDate').value||ClassAttendance.dateKey();
     try{
       if(!classTeacherPin){summary.innerHTML='<button class="btn btn-ghost" id="unlockClassAttendance">교사 PIN으로 출결 열기</button>';body.innerHTML='';document.getElementById('unlockClassAttendance').onclick=function(){classTeacherPin=prompt('출결 조회용 교사 PIN을 입력하세요.')||'';if(classTeacherPin)renderClassPanel();};return;}
@@ -669,7 +673,7 @@
     document.getElementById('kiosk').style.display = 'none';
     renderStudentTable();
     var attDate = document.getElementById('attDate');
-    if (!attDate.value) attDate.value = todayKey(operationalDate(new Date()));
+    if (!attDate.value){var next=new Date();while(['wed','sat','sun'].indexOf(ClassAttendance.dayKey(ClassAttendance.dateKey(next)))<0)next.setDate(next.getDate()+1);attDate.value=ClassAttendance.dateKey(next);}
     refreshAttendancePanel();
     document.getElementById('sbUrl').value = state.sbUrl;
     document.getElementById('sbKey').value = state.sbKey;
@@ -851,7 +855,13 @@
   var attDateInput = document.getElementById('attDate');
   attDateInput.addEventListener('change', refreshAttendancePanel);
 
+  document.getElementById('attendanceViewMode').addEventListener('change',refreshAttendancePanel);
+  document.querySelectorAll('[data-lesson-day]').forEach(function(button){button.addEventListener('click',function(){var date=new Date();while(ClassAttendance.dayKey(ClassAttendance.dateKey(date))!==button.dataset.lessonDay)date.setDate(date.getDate()+1);attDateInput.value=ClassAttendance.dateKey(date);document.getElementById('attendanceViewMode').value='lesson';refreshAttendancePanel();});});
   function refreshAttendancePanel() {
+    var lessons=document.getElementById('attendanceViewMode').value==='lesson';
+    document.getElementById('lessonAttendanceCard').hidden=!lessons;
+    document.getElementById('lessonDayButtons').hidden=!lessons;
+    document.querySelectorAll('[data-clinic-attendance]').forEach(function(card){card.hidden=lessons;});
     renderClassPanel();
     var dateVal = attDateInput.value || todayKey(operationalDate(new Date()));
     var parts = dateVal.split('-').map(Number);
@@ -1400,6 +1410,7 @@
             time: row.time_slot || '',
             weekStart: row.week_start || '',
             kingStudentId: old && old.kingStudentId ? old.kingStudentId : null,
+            classId: old && old.classId ? old.classId : null,
             kingSlotId: old && old.kingSlotId ? old.kingSlotId : null,
             kingSchoolId: old && old.kingSchoolId ? old.kingSchoolId : null
           };
