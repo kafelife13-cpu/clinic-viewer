@@ -1,6 +1,8 @@
 {
-  "name": "클리닉 출석 체크인",
-  "short_name": "클리닉체크인",
+  "name": "국어왕 출결패드 · 학생",
+  "short_name": "출결패드",
+  "id": "./",
+  "scope": "./",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#f4f6fb",

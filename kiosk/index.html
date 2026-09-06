@@ -7,14 +7,14 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>클리닉 출석 체크</title>
-<link rel="manifest" href="../manifest.json?v=20260813-2">
+<link rel="manifest" href="./manifest.json?v=20260906">
 <link rel="icon" href="../icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="../icon.svg">
 <meta name="theme-color" content="#2f6fed">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="클리닉 체크인">
-<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script async src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <style>
   :root {
     --primary: #2f6fed;
@@ -33,14 +33,14 @@
     margin: 0; padding: 0; height: 100%;
     font-family: "Malgun Gothic", "Apple SD Gothic Neo", "Segoe UI", sans-serif;
     background: var(--bg); color: var(--text);
-    overflow: hidden;
+    overflow: auto;
   }
   #app { height: 100%; width: 100%; position: relative; }
 
   /* ---------- Kiosk view ---------- */
   #kiosk {
-    height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    padding: 24px;
+    min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+    padding: 140px 24px 24px;
   }
   .kiosk-header {
     position: absolute; top: 0; left: 0; right: 0;
@@ -61,7 +61,7 @@
   .phone-display {
     font-size: 44px; font-weight: 700; letter-spacing: 2px; color: var(--text);
     background: var(--card); border: 2px solid var(--border); border-radius: 18px;
-    min-width: 420px; text-align: center; padding: 22px 18px; margin-bottom: 26px;
+    width: min(420px,100%); text-align: center; padding: 22px 18px; margin-bottom: 26px;
     box-shadow: 0 2px 10px rgba(30,40,80,0.05);
   }
   .phone-display.placeholder { color: #c3c9db; }
@@ -75,6 +75,18 @@
     box-shadow: 0 2px 6px rgba(30,40,80,0.08); cursor: pointer;
   }
   .key:active { background: #e9ecf5; transform: scale(0.97); }
+  button,select { touch-action: manipulation; }
+  .key:disabled { opacity:.6; cursor:wait; }
+  @media(max-width:600px){
+    #kiosk{padding:140px 14px 24px}
+    .kiosk-header{padding:14px;gap:10px;flex-wrap:wrap}
+    .clinic-title{font-size:20px}.date-badge{font-size:16px}
+    .gear-btn{min-width:0;font-size:13px;padding:0 10px}
+    .phone-display{font-size:28px;padding:18px 10px}
+    .keypad{width:100%;max-width:340px;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+    .key{width:100%;height:72px}
+    #confirmBtn{max-width:100%}.hint{text-align:center;font-size:14px}
+  }
   .key.action { background: #eef1fa; color: var(--muted); font-size: 22px; }
   .key.confirm { background: var(--primary); color: #fff; }
   .key.confirm:active { background: var(--primary-dark); }
@@ -83,7 +95,7 @@
 
   /* ---------- Result overlay ---------- */
   #result {
-    position: absolute; top: 0; left: 0; right: 0; bottom: 0; inset: 0; display: none; align-items: center; justify-content: center;
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0; inset: 0; display: none; align-items: center; justify-content: center;
     flex-direction: column; text-align: center; padding: 40px; z-index: 20;
   }
   #result.show { display: flex; }
@@ -201,6 +213,7 @@
     <div class="result-icon" id="resultIcon">✅</div>
     <div class="result-name" id="resultName"></div>
     <div class="result-msg" id="resultMsg"></div>
+    <button class="btn" id="dismissResultBtn" style="margin-top:24px;background:white;color:#1a2233">다음 학생 · 닫기</button>
   </div>
 
   <!-- ADMIN VIEW -->
@@ -518,7 +531,9 @@
   setInterval(updateTodayLabel, 15000);
 
   document.getElementById('keypad').addEventListener('click', function (e) {
-    var btn = e.target.closest('.key');
+    var btn = e.target;
+    while(btn && btn!==this && !btn.classList.contains('key'))btn=btn.parentElement;
+    if(btn===this)return;
     if (!btn) return;
     var k = btn.getAttribute('data-k');
     if (k === 'clear') phone = '';
@@ -527,16 +542,19 @@
     renderPhone();
   });
 
+  var resultTimer=null;
+  function dismissResult(){
+    clearTimeout(resultTimer);resultTimer=null;
+    resultEl.className='';phone='';renderPhone();
+  }
+  document.getElementById('dismissResultBtn').addEventListener('click',dismissResult);
   function showResult(type, icon, name, msg) {
+    clearTimeout(resultTimer);
     resultEl.className = 'show ' + type;
     resultIcon.textContent = icon;
     resultName.textContent = name;
     resultMsg.textContent = msg;
-    setTimeout(function () {
-      resultEl.className = '';
-      phone = '';
-      renderPhone();
-    }, 2600);
+    resultTimer=setTimeout(dismissResult,2600);
   }
 
   // Regular lessons have their own records; never reuse clinic check-ins.
@@ -546,49 +564,66 @@
   classModeEl.addEventListener('change',function(){classMode=this.value;state.classMode=classMode;saveData();phone='';renderPhone();});
   function classRpc(name,payload){
     if(!state.sbUrl||!state.sbKey)return Promise.reject(new Error('출결 서버 연결을 먼저 설정해 주세요.'));
-    return fetch(state.sbUrl.replace(/\/+$/,'')+'/rest/v1/rpc/'+name,{method:'POST',headers:{apikey:state.sbKey,'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json().then(function(data){if(!r.ok)throw new Error(data.message||'출결 저장 실패');return data;});});
+    return new Promise(function(resolve,reject){
+      var controller=typeof AbortController!=='undefined'?new AbortController():null;
+      var timer=setTimeout(function(){reject(new Error('서버 응답이 늦어 전송을 대기합니다.'));if(controller)controller.abort();},8000);
+      var options={method:'POST',headers:{apikey:state.sbKey,'Content-Type':'application/json'},body:JSON.stringify(payload)};
+      if(controller)options.signal=controller.signal;
+      fetch(state.sbUrl.replace(/\/+$/,'')+'/rest/v1/rpc/'+name,options).then(function(r){return r.json().then(function(data){if(!r.ok)throw new Error(data.message||'출결 저장 실패');return data;});}).then(function(data){clearTimeout(timer);resolve(data);},function(e){clearTimeout(timer);reject(e);});
+    });
   }
   function syncClassRecord(record){
     return classRpc('check_in_class',{p_student_id:record.student_id,p_student_name:record.student_name,p_class_id:record.class_id,p_checked_in_at:record.checked_in_at}).then(function(data){record.synced=true;record.error='';saveData();return data;}).catch(function(e){record.error=e.message;saveData();throw e;});
   }
-  async function checkInRegularClass(student){
+  function checkInRegularClass(student){
     if(classCheckInBusy)return;
     var cls=ClassAttendance.find(student.classId),date=ClassAttendance.dateKey();
     if(!cls||!student.kingStudentId){showResult('err','⚠️',student.name,'수업 반이 배정되지 않았습니다. 선생님께 확인해 주세요.');return;}
     if(cls.kind!==classMode||cls.day!==ClassAttendance.dayKey(date)){showResult('warn','📅',student.name,cls.label+' 수업 학생입니다.\n출석 종류와 수업 요일을 확인해 주세요.');return;}
     classCheckInBusy=true;
+    var confirmButton=document.getElementById('confirmBtn');confirmButton.disabled=true;confirmButton.textContent='출석 저장 중…';
     var records=state.classAttendance||(state.classAttendance=[]);
     var record=records.find(function(r){return r.student_id===student.kingStudentId&&r.class_id===cls.id&&r.lesson_date===date;});
-    if(!record){record={student_id:student.kingStudentId,student_name:student.name,class_id:cls.id,lesson_date:date,checked_in_at:new Date().toISOString(),synced:false};records.push(record);saveData();}
-    try{var saved=await syncClassRecord(record);showResult('ok','✅',student.name+'님',cls.label+'\n수업 출석이 확인되었습니다 ('+new Date(saved.checked_in_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})+')');}
-    catch(e){showResult('warn','☁️',student.name+'님','수업 출석 전송 대기\n'+e.message+'\n연결이 돌아오면 다시 전송합니다.');}
-    finally{classCheckInBusy=false;renderClassPanel();}
+    var added=false,persisted=false;
+    return Promise.resolve().then(function(){
+      if(!record){record={student_id:student.kingStudentId,student_name:student.name,class_id:cls.id,lesson_date:date,checked_in_at:new Date().toISOString(),synced:false};records.push(record);added=true;}
+      saveData();persisted=true;
+      return syncClassRecord(record);
+    }).then(function(saved){showResult('ok','✅',student.name+'님',cls.label+'\n수업 출석이 확인되었습니다 ('+new Date(saved.checked_in_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})+')');
+    }).catch(function(e){
+      if(!persisted){if(added)records.splice(records.indexOf(record),1);showResult('err','⚠️',student.name+'님','기기에 출석을 저장하지 못했어요.\n선생님에게 알려주세요.');}
+      else showResult('warn','☁️',student.name+'님','수업 출석 전송 대기\n'+e.message+'\n연결이 돌아오면 다시 전송합니다.');
+    }).then(release,release);
+    function release(){classCheckInBusy=false;confirmButton.disabled=false;confirmButton.textContent='출석 확인';renderClassPanel();}
   }
+  var classRetryBusy=false;
   function retryClassAttendance(){
-    if(!navigator.onLine)return;
-    (state.classAttendance||[]).filter(function(r){return !r.synced;}).reduce(function(p,r){return p.then(function(){return syncClassRecord(r).catch(function(){});});},Promise.resolve());
+    if(!navigator.onLine||classRetryBusy||classCheckInBusy)return;
+    classRetryBusy=true;
+    (state.classAttendance||[]).filter(function(r){return !r.synced;}).reduce(function(p,r){return p.then(function(){return syncClassRecord(r).catch(function(){});});},Promise.resolve()).then(function(){classRetryBusy=false;},function(){classRetryBusy=false;});
   }
-  async function renderClassPanel(){
+  function renderClassPanel(){
     var body=document.getElementById('classAttBody'),summary=document.getElementById('classAttSummary');if(!body||!adminOpen||document.getElementById('attendanceViewMode').value!=='lesson')return;
     var run=++classPanelRun,date=document.getElementById('attDate').value||ClassAttendance.dateKey();
-    try{
+    return Promise.resolve().then(function(){
       if(!classTeacherPin){summary.innerHTML='<button class="btn btn-ghost" id="unlockClassAttendance">교사 PIN으로 출결 열기</button>';body.innerHTML='';document.getElementById('unlockClassAttendance').onclick=function(){classTeacherPin=prompt('출결 조회용 교사 PIN을 입력하세요.')||'';if(classTeacherPin)renderClassPanel();};return;}
-      var records=await classRpc('teacher_read_attendance',{p_pin:classTeacherPin,p_kind:'class',p_start:date+'T00:00:00+09:00',p_end:date+'T23:59:59.999+09:00'});if(run!==classPanelRun)return;
+      return classRpc('teacher_read_attendance',{p_pin:classTeacherPin,p_kind:'class',p_start:date+'T00:00:00+09:00',p_end:date+'T23:59:59.999+09:00'});
+    }).then(function(records){if(!records||run!==classPanelRun)return;
       var students=state.students.filter(function(s){var c=ClassAttendance.find(s.classId);return s.kingStudentId&&c&&c.day===ClassAttendance.dayKey(date);});
       students.sort(function(a,b){return ClassAttendance.find(a.classId).start.localeCompare(ClassAttendance.find(b.classId).start)||a.name.localeCompare(b.name,'ko');});
       var count=0;
       body.innerHTML=students.map(function(s){var c=ClassAttendance.find(s.classId),r=records.find(function(a){return ClassAttendance.matches(a,s.kingStudentId,c.id,date);}),status=ClassAttendance.status(r,c,date);if(r)count++;return '<tr><td>'+escapeHtml(s.name)+'</td><td>'+c.label+'</td><td>'+status.label+'</td><td>'+(r?new Date(r.checked_in_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}):'—')+'</td><td><button class="btn btn-ghost" data-class-id="'+escapeHtml(s.id)+'" data-action="'+(r?'cancel':'present')+'"'+(date>ClassAttendance.dateKey()?' disabled':'')+'>'+(r?'출석 취소':'출석 처리')+'</button></td></tr>';}).join('')||'<tr><td colspan="5">해당 날짜의 수업이 없습니다.</td></tr>';
       summary.textContent=date+' · '+count+' / '+students.length+'명 출석 · 전송 대기 '+(state.classAttendance||[]).filter(function(r){return !r.synced;}).length+'건';
-    }catch(e){if(run===classPanelRun){summary.textContent='수업 출결 조회 실패 — 새로고침해 주세요.';body.innerHTML='';}}
+    }).catch(function(e){if(run===classPanelRun){summary.textContent='수업 출결 조회 실패 — 새로고침해 주세요.';body.innerHTML='';}});
   }
-  document.getElementById('classAttBody').addEventListener('click',async function(e){
+  document.getElementById('classAttBody').addEventListener('click',function(e){
     var b=e.target.closest('[data-class-id]');if(!b||b.disabled)return;
     var student=state.students.find(function(s){return s.id===b.dataset.classId;}),date=document.getElementById('attDate').value,action=b.dataset.action;if(!student)return;
     if(!confirm(student.name+' · '+date+' 수업 '+(action==='cancel'?'출석을 취소할까요?':'출석 처리할까요?')))return;
     if(!classTeacherPin){classTeacherPin=prompt('출결 서버의 교사 PIN을 입력하세요.')||'';if(!classTeacherPin)return;}
     b.disabled=true;
-    try{await classRpc('teacher_edit_class_attendance',{p_pin:classTeacherPin,p_action:action,p_student_id:student.kingStudentId,p_student_name:student.name,p_class_id:student.classId,p_lesson_date:date});if(action==='cancel'){(state.classAttendance||[]).filter(function(r){return r.student_id===student.kingStudentId&&r.class_id===student.classId&&r.lesson_date===date;}).forEach(function(r){r.synced=true;});saveData();}await renderClassPanel();}
-    catch(error){if(error.message.includes('invalid teacher pin'))classTeacherPin='';alert('출결 저장 실패: '+error.message);b.disabled=false;}
+    classRpc('teacher_edit_class_attendance',{p_pin:classTeacherPin,p_action:action,p_student_id:student.kingStudentId,p_student_name:student.name,p_class_id:student.classId,p_lesson_date:date}).then(function(){if(action==='cancel'){(state.classAttendance||[]).filter(function(r){return r.student_id===student.kingStudentId&&r.class_id===student.classId&&r.lesson_date===date;}).forEach(function(r){r.synced=true;});saveData();}return renderClassPanel();})
+    .catch(function(error){if(error.message.indexOf('invalid teacher pin')!==-1)classTeacherPin='';alert('출결 저장 실패: '+error.message);b.disabled=false;});
   });
   setInterval(function(){if(!document.hidden)renderClassPanel();retryClassAttendance();},10000);
   window.addEventListener('online',retryClassAttendance);
@@ -622,7 +657,11 @@
     var attId = uid();
     var isoNow = now.toISOString();
     state.attendance.push({ id: attId, studentId: student.id, date: dKey, day: wKey, time: timeStr, iso: isoNow, synced: false });
-    saveData();
+    try { saveData(); } catch(error) {
+      state.attendance=state.attendance.filter(function(a){return a.id!==attId;});
+      showResult('err','⚠️','저장 실패','기기에 출석을 저장하지 못했어요.\n선생님에게 알려주세요.');
+      return;
+    }
     syncAttendanceToCloud(student, wKey, timeStr, attId, isoNow);
     syncAttendanceToKing(student, attId, isoNow);
 
