@@ -170,7 +170,7 @@
   .muted-small { color: var(--muted); font-size: 12px; margin-top: 6px; }
 </style>
 <script src="../class-attendance.js"></script>
-<script src="../weekend-roster.js?v=1"></script>
+<script src="../weekend-roster.js?v=2"></script>
 </head>
 <body>
 <div id="app">
@@ -185,6 +185,7 @@
       </div>
       <div style="display:flex; gap:8px;">
         <button class="gear-btn" id="refreshBtn" title="새로고침">🔄 새로고침</button>
+        <button class="gear-btn" id="authorizeRosterBtn">명단 인증</button>
         <button class="gear-btn" id="openAdminBtn" title="관리자">⚙ 관리자</button>
       </div>
     </div>
@@ -565,14 +566,22 @@
   classModeEl.value=classMode;
   classModeEl.addEventListener('change',function(){classMode=this.value;state.classMode=classMode;saveData();phone='';renderPhone();refreshWeekendInfo();});
   var weekendInfoRun=0;
+  document.getElementById('authorizeRosterBtn').addEventListener('click',function(){
+    var pin=prompt('기존 출결 현황판의 교사 PIN을 입력하세요. 이 화면을 사용하는 동안 명단 인증이 유지됩니다.');
+    if(!pin)return;
+    classRpc('teacher_read_attendance',{p_pin:pin,p_kind:'class',p_start:'2099-01-01T00:00:00Z',p_end:'2099-01-01T00:00:00Z'}).then(function(){
+      classTeacherPin=pin;document.getElementById('authorizeRosterBtn').textContent='명단 인증됨';refreshWeekendInfo();
+    }).catch(function(){classTeacherPin='';document.getElementById('authorizeRosterBtn').textContent='명단 인증';alert('교사 PIN 또는 서버 연결을 확인해 주세요.');refreshWeekendInfo();});
+  });
   function refreshWeekendInfo(){
     var box=document.getElementById('weekendRosterInfo'),run=++weekendInfoRun;
     if(classMode!=='weekend'){box.textContent='';return;}
+    if(!classTeacherPin){box.textContent='상단 명단 인증에서 기존 교사 PIN을 입력해 주세요.';return;}
     var today=ClassAttendance.dateKey(),at=new Date(today+'T12:00:00+09:00'),dow=at.getUTCDay();
     at.setUTCDate(at.getUTCDate()+(dow===0?-1:6-dow));
     var sat=ClassAttendance.dateKey(at);at.setUTCDate(at.getUTCDate()+1);var sun=ClassAttendance.dateKey(at);
     box.textContent='토·일 맥가이 명단 확인 중…';
-    Promise.all([sat,sun].map(function(date){return WeekendRoster.load(state.sbUrl||'',state.sbKey||'',date).then(function(s){return date+' '+s.classes.reduce(function(n,c){return n+c.expected_count;},0)+'명 · v'+s.version;}).catch(function(){return date+' 명단 확인 필요';});})).then(function(labels){if(run===weekendInfoRun)box.textContent=labels.join(' / ')+' · 출석 입력 시 최신 명단 확인';});
+    Promise.all([sat,sun].map(function(date){return WeekendRoster.load(state.sbUrl||'',state.sbKey||'',date,classTeacherPin).then(function(s){return date+' '+s.classes.reduce(function(n,c){return n+c.expected_count;},0)+'명 · v'+s.version;}).catch(function(){return date+' 명단 확인 필요';});})).then(function(labels){if(run===weekendInfoRun)box.textContent=labels.join(' / ')+' · 출석 입력 시 최신 명단 확인';});
   }
   setTimeout(refreshWeekendInfo,0);setInterval(refreshWeekendInfo,60000);
   function classRpc(name,payload){
@@ -593,7 +602,7 @@
     if(classMode!=='weekend')return checkInResolvedClass(student,ClassAttendance.find(student.classId));
     if(weekendResolving||classCheckInBusy)return;
     var date=ClassAttendance.dateKey();weekendResolving=true;
-    return WeekendRoster.load(state.sbUrl||'',state.sbKey||'',date).then(function(snapshot){
+    return WeekendRoster.load(state.sbUrl||'',state.sbKey||'',date,classTeacherPin).then(function(snapshot){
       if(classMode!=='weekend'||date!==ClassAttendance.dateKey())throw Error('날짜 또는 출석 종류가 바뀌었습니다. 다시 입력해 주세요.');
       var ids=WeekendRoster.assignments(snapshot,date,student.kingStudentId);
       if(ids.length!==1)throw Error(ids.length?'오늘 수업이 여러 개입니다. 선생님이 수업별로 확인해 주세요.':'오늘 맥가이 수업 명단에 없습니다. 선생님께 확인해 주세요.');
@@ -632,7 +641,7 @@
     var run=++classPanelRun,date=document.getElementById('attDate').value||ClassAttendance.dateKey();
     return Promise.resolve().then(function(){
       if(!classTeacherPin){summary.innerHTML='<button class="btn btn-ghost" id="unlockClassAttendance">교사 PIN으로 출결 열기</button>';body.innerHTML='';document.getElementById('unlockClassAttendance').onclick=function(){classTeacherPin=prompt('출결 조회용 교사 PIN을 입력하세요.')||'';if(classTeacherPin)renderClassPanel();};return;}
-      return Promise.all([classRpc('teacher_read_attendance',{p_pin:classTeacherPin,p_kind:'class',p_start:date+'T00:00:00+09:00',p_end:date+'T23:59:59.999+09:00'}),WeekendRoster.load(state.sbUrl,state.sbKey,date)]);
+      return Promise.all([classRpc('teacher_read_attendance',{p_pin:classTeacherPin,p_kind:'class',p_start:date+'T00:00:00+09:00',p_end:date+'T23:59:59.999+09:00'}),WeekendRoster.load(state.sbUrl,state.sbKey,date,classTeacherPin)]);
     }).then(function(result){if(!result||run!==classPanelRun)return;
       var records=result[0],snapshot=result[1];
       var students=state.students.filter(function(s){var c=ClassAttendance.find(s.classId);return s.kingStudentId&&c&&c.day===ClassAttendance.dayKey(date);});

@@ -20,10 +20,11 @@
   var a=map(before),b=map(after),changes=[];
   Array.from(new Set(Object.keys(a).concat(Object.keys(b)))).sort().forEach(function(id){if(JSON.stringify(a[id])!==JSON.stringify(b[id]))changes.push({student_id:id,type:!a[id]?'added':!b[id]?'removed':'transferred',before:a[id]||[],after:b[id]||[]});});return changes;
  }
- function load(url,key,date){
+ function load(url,key,date,pin){
   if(!required(date).length)return Promise.resolve(null);
+  if(!pin)return Promise.reject(Error('관리자 인증 후 명단을 확인해 주세요.'));
   var controller=new AbortController(),timer=setTimeout(function(){controller.abort();},8000);
-  return fetch(url.replace(/\/+$/,'')+'/rest/v1/rpc/read_weekend_roster',{method:'POST',cache:'no-store',headers:{apikey:key,'Content-Type':'application/json'},body:JSON.stringify({p_date:date}),signal:controller.signal}).then(function(r){if(!r.ok)throw Error('맥가이 명단 서버 확인 필요');return r.json();}).then(function(r){return validate(r,date);}).finally(function(){clearTimeout(timer);});
+  return fetch(url.replace(/\/+$/,'')+'/rest/v1/rpc/read_weekend_roster',{method:'POST',cache:'no-store',headers:{apikey:key,'Content-Type':'application/json'},body:JSON.stringify({p_date:date,p_pin:pin}),signal:controller.signal}).then(function(r){if(!r.ok)throw Error('맥가이 명단 서버 확인 필요');return r.json();}).then(function(r){return validate(r,date);}).finally(function(){clearTimeout(timer);});
  }
  var api={required:required,validate:validate,assignments:assignments,rows:rows,label:label,diff:diff,load:load};
  if(typeof module==='object'&&module.exports)module.exports=api;else root.WeekendRoster=api;

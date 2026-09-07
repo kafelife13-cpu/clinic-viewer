@@ -122,7 +122,7 @@
   .pin-dialog button { width: 100%; margin-top: 12px; padding: 12px; border: 0; border-radius: 10px; background: var(--primary); color: white; font-weight: 700; }
 </style>
 <script src="class-attendance.js"></script>
-<script src="weekend-roster.js?v=1"></script>
+<script src="weekend-roster.js?v=2"></script>
 </head>
 <body>
 
@@ -160,6 +160,7 @@
       <input type="date" id="specificDate">
       <button class="filter-btn" id="clearDateBtn" style="display:none;">이번 주로 돌아가기</button>
     </div>
+    <div id="rosterStatus" role="status" style="margin:12px 0;padding:14px;background:#eef2ff;border-radius:12px;white-space:pre-line;display:none"></div>
     <div id="list"></div>
   </div>
 </div>
@@ -590,12 +591,15 @@
       getKingJson('users?select=id,name,school_id,group_id,status,role'),
       getKingJson('qa_schools?select=id,name'),
       readAttendance('class').then(function(rows){return {rows:rows};}).catch(function(e){return {error:e.message};}),
-      WeekendRoster.load(cfg.url,cfg.key,dateStr(selectedAttendanceDate())).then(function(snapshot){return {snapshot:snapshot};}).catch(function(e){return {error:e.message};})
+      WeekendRoster.load(cfg.url,cfg.key,dateStr(selectedAttendanceDate()),adminPin).then(function(snapshot){return {snapshot:snapshot};}).catch(function(e){return {error:e.message};})
     ]).then(function (results) {
       if(fetchRun!==classLoadRun)return;
       lastClassRows=results[6].rows||[];classLoadError=results[6].error||'';
       classStudents=(results[4]||[]).filter(function(u){return u.role==='student'&&u.status==='active'&&ClassAttendance.find(u.group_id);}).map(function(u){return {id:u.id,student_name:u.name,class_id:u.group_id};});
       weekendSnapshot=results[7].snapshot||null;
+      var rosterStatus=document.getElementById('rosterStatus');
+      rosterStatus.style.display=WeekendRoster.required(dateStr(selectedAttendanceDate())).length?'block':'none';
+      rosterStatus.textContent=weekendSnapshot?'패드와 같은 최신 명단\n'+WeekendRoster.label(weekendSnapshot)+'\n'+weekendSnapshot.classes.map(function(c){var cls=ClassAttendance.find(c.class_id);return (cls?cls.label:c.class_id)+' '+c.expected_count+'명';}).join(' / '):'명단 확인 필요: '+(results[7].error||'아직 반영되지 않았습니다.');
       if(WeekendRoster.required(dateStr(selectedAttendanceDate())).length){
         try{if(results[7].error)throw Error(results[7].error);classStudents=WeekendRoster.rows(weekendSnapshot,dateStr(selectedAttendanceDate()),(results[4]||[]).filter(function(u){return u.role==='student';}).map(function(u){return {id:u.id,student_name:u.name};}));}
         catch(e){classLoadError=e.message;classStudents=[];}

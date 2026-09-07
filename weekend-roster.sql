@@ -47,6 +47,7 @@ returns jsonb language sql stable security definer set search_path=pg_catalog,pr
  from private.weekend_rosters where lesson_date=p_date order by id desc limit 1),jsonb_build_object('date',p_date,'version',null,'classes','[]'::jsonb));
 $$;
 revoke all on function public.read_weekend_roster(date) from public;
-grant execute on function public.read_weekend_roster(date) to anon,authenticated;
+revoke all on function public.read_weekend_roster(date) from anon,authenticated;
+-- Apply weekend-roster-auth.sql for PIN-protected client access.
 notify pgrst,'reload schema';
 commit;

@@ -8,7 +8,7 @@ const code=html.slice(html.indexOf('  function classRpc('),html.indexOf('  var c
 async function run(assigned){
  const recorded=[],messages=[];
  const ctx={Promise,Date,AbortController,clearTimeout,setTimeout,
- state:{classAttendance:[],sbUrl:'https://example.test',sbKey:'test'},classCheckInBusy:false,classMode:'weekend',
+ state:{classAttendance:[],sbUrl:'https://example.test',sbKey:'test'},classCheckInBusy:false,classMode:'weekend',classTeacherPin:'test-pin',
  WeekendRoster:{load:async()=>({}),assignments:()=>assigned},
  ClassAttendance:{find:id=>({id,kind:'weekend',day:'sat',label:id}),dateKey:()=> '2026-09-12',dayKey:()=> 'sat'},
  document:{getElementById:()=>({})},showResult:(...m)=>messages.push(m),saveData:()=>{},renderClassPanel:()=>{},
