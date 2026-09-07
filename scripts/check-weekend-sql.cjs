@@ -12,8 +12,8 @@ await assert.rejects(put([...classes.slice(0,2),{...classes[2],expected_count:2,
 classes[1].student_ids=['b'];classes[2].student_ids=['a'];const two=(await put(classes)).rows[0].id;assert.notEqual(two,one);
 assert.equal((await db.query('select count(*)::int n from private.weekend_rosters')).rows[0].n,2);
 await db.exec('set role anon');
-assert.equal((await db.query('select public.read_weekend_roster($1) r',[date])).rows[0].r.version,two);
+await assert.rejects(db.query('select public.read_weekend_roster($1) r',[date]),/permission denied/);
 await assert.rejects(db.query('select * from private.weekend_rosters'),/permission denied/);
 await assert.rejects(put(classes),/permission denied/);
-await db.close();console.log('PASS: SQL validation, retry idempotency, immutable revisions, anonymous read only, protected writes');
+await db.close();console.log('PASS: SQL validation, retry idempotency, immutable revisions, anonymous reads blocked, protected writes');
 })().catch(e=>{console.error(e);process.exitCode=1;});
