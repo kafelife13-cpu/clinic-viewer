@@ -11,7 +11,7 @@ async function run(storageFails){
     saveData:()=>{if(storageFails)throw new Error('quota');}};
   vm.createContext(ctx);
   vm.runInContext(section('  function classRpc(', '  var classRetryBusy='),ctx);
-  await ctx.checkInRegularClass({name:'테스트',kingStudentId:'fixture',classId:'fixture'});
+  await ctx.checkInResolvedClass({name:'테스트',kingStudentId:'fixture',classId:'fixture'},ctx.ClassAttendance.find());
   assert.equal(ctx.classCheckInBusy,false);assert.equal(button.disabled,false);
   assert.equal(ctx.state.classAttendance.length,storageFails?0:1);
   assert.equal(results[0][0],storageFails?'err':'warn');

@@ -122,6 +122,7 @@
   .pin-dialog button { width: 100%; margin-top: 12px; padding: 12px; border: 0; border-radius: 10px; background: var(--primary); color: white; font-weight: 700; }
 </style>
 <script src="class-attendance.js"></script>
+<script src="weekend-roster.js?v=1"></script>
 </head>
 <body>
 
@@ -390,22 +391,22 @@
     return bits.join('');
   }
 
-  var attendanceMode='clinic',lastClassRows=[],classStudents=[],classLoadError='',classLoadRun=0;
+  var weekendSnapshot=null,attendanceMode='clinic',lastClassRows=[],classStudents=[],classLoadError='',classLoadRun=0;
   document.getElementById('attendanceMode').addEventListener('change',function(){attendanceMode=this.value;fetchData(false);});
   function renderClassToday(){
     var date=dateStr(selectedAttendanceDate()),day=ClassAttendance.dayKey(date),list=document.getElementById('list');
-    if(classLoadError){list.innerHTML='<div class="empty">수업 출결 조회에 실패했습니다. 새로고침해 주세요.</div>';return;}
+    if(classLoadError){list.innerHTML='<div class="empty">'+escapeHtml(classLoadError)+'</div>';return;}
     var rows=classStudents.filter(function(s){var c=ClassAttendance.find(s.class_id);return c&&c.kind===attendanceMode&&c.day===day;});
     rows.sort(function(a,b){return ClassAttendance.find(a.class_id).start.localeCompare(ClassAttendance.find(b.class_id).start)||a.student_name.localeCompare(b.student_name,'ko');});
-    var count=0,previous='',html=rows.map(function(s){var c=ClassAttendance.find(s.class_id),r=lastClassRows.find(function(a){return ClassAttendance.matches(a,s.id,c.id,date);}),status=ClassAttendance.status(r,c,date);if(r)count++;var heading=previous!==c.id?'<div class="class-header">'+c.label+'</div>':'';previous=c.id;return heading+'<div class="item'+(r?'':' absent')+'"><div class="left"><div class="name">'+escapeHtml(s.student_name)+'</div></div><div class="right"><span class="pill '+(r?'pill-ok':'pill-no')+'">'+status.label+'</span>'+(r?'<span class="time">'+fmtTime(r.checked_in_at)+'</span>':'')+'<button class="attendance-action'+(r?' cancel':'')+'" data-class-student="'+escapeHtml(s.id)+'" data-class-action="'+(r?'cancel':'present')+'"'+(date>ClassAttendance.dateKey()?' disabled':'')+'>'+(r?'출석 취소':'출석 처리')+'</button></div></div>';}).join('');
-    list.innerHTML='<div class="day-header">'+date+' · '+count+' / '+rows.length+'명 출석</div>'+ (html||'<div class="empty">이 날짜에는 선택한 종류의 수업이 없습니다.</div>');
+    var count=0,previous='',html=rows.map(function(s){var c=ClassAttendance.find(s.class_id),r=lastClassRows.find(function(a){return ClassAttendance.matches(a,s.id,c.id,date);}),status=ClassAttendance.status(r,c,date);if(r)count++;var heading=previous!==c.id?'<div class="class-header">'+c.label+'</div>':'';previous=c.id;return heading+'<div class="item'+(r?'':' absent')+'"><div class="left"><div class="name">'+escapeHtml(s.student_name)+'</div></div><div class="right"><span class="pill '+(r?'pill-ok':'pill-no')+'">'+status.label+'</span>'+(r?'<span class="time">'+fmtTime(r.checked_in_at)+'</span>':'')+'<button class="attendance-action'+(r?' cancel':'')+'" data-class-student="'+escapeHtml(s.id)+'" data-lesson-class="'+c.id+'" data-class-action="'+(r?'cancel':'present')+'"'+(date>ClassAttendance.dateKey()?' disabled':'')+'>'+(r?'출석 취소':'출석 처리')+'</button></div></div>';}).join('');
+    list.innerHTML='<div class="day-header">'+(weekendSnapshot?WeekendRoster.label(weekendSnapshot):date)+' · '+count+' / '+rows.length+'명 출석</div>'+ (html||'<div class="empty">이 날짜에는 선택한 종류의 수업이 없습니다.</div>');
   }
   function renderClassAll(){
     document.getElementById('list').innerHTML=classLoadError?'<div class="empty">수업 출결 조회 실패</div>':lastClassRows.filter(function(r){var c=ClassAttendance.find(r.class_id);return !r.cancelled_at&&c&&c.kind===attendanceMode;}).map(function(r){return '<div class="item"><div class="left"><div class="name">'+escapeHtml(r.student_name)+'</div><div class="meta">'+r.lesson_date+' · '+ClassAttendance.find(r.class_id).label+'</div></div><div class="time">'+fmtTime(r.checked_in_at)+'</div></div>';}).join('')||'<div class="empty">아직 수업 출석 기록이 없습니다.</div>';
   }
   document.getElementById('list').addEventListener('click',async function(e){
     var b=e.target.closest('[data-class-student]');if(!b||b.disabled)return;
-    var s=classStudents.find(function(s){return s.id===b.dataset.classStudent;}),action=b.dataset.classAction,date=dateStr(selectedAttendanceDate());if(!s)return;
+    var s=classStudents.find(function(s){return s.id===b.dataset.classStudent&&s.class_id===b.dataset.lessonClass;}),action=b.dataset.classAction,date=dateStr(selectedAttendanceDate());if(!s)return;
     if(!confirm(s.student_name+' · '+date+' 수업 '+(action==='cancel'?'출석을 취소할까요?':'출석 처리할까요?')))return;
     if(!adminPin){await requestTeacherPin();if(!adminPin)return;}
     b.disabled=true;
@@ -588,11 +589,18 @@
       getKingJson('clinic_slots?select=*'),
       getKingJson('users?select=id,name,school_id,group_id,status,role'),
       getKingJson('qa_schools?select=id,name'),
-      readAttendance('class').then(function(rows){return {rows:rows};}).catch(function(e){return {error:e.message};})
+      readAttendance('class').then(function(rows){return {rows:rows};}).catch(function(e){return {error:e.message};}),
+      WeekendRoster.load(cfg.url,cfg.key,dateStr(selectedAttendanceDate())).then(function(snapshot){return {snapshot:snapshot};}).catch(function(e){return {error:e.message};})
     ]).then(function (results) {
       if(fetchRun!==classLoadRun)return;
       lastClassRows=results[6].rows||[];classLoadError=results[6].error||'';
       classStudents=(results[4]||[]).filter(function(u){return u.role==='student'&&u.status==='active'&&ClassAttendance.find(u.group_id);}).map(function(u){return {id:u.id,student_name:u.name,class_id:u.group_id};});
+      weekendSnapshot=results[7].snapshot||null;
+      if(WeekendRoster.required(dateStr(selectedAttendanceDate())).length){
+        try{if(results[7].error)throw Error(results[7].error);classStudents=WeekendRoster.rows(weekendSnapshot,dateStr(selectedAttendanceDate()),(results[4]||[]).filter(function(u){return u.role==='student';}).map(function(u){return {id:u.id,student_name:u.name};}));}
+        catch(e){classLoadError=e.message;classStudents=[];}
+      }
+      lastClassRows.filter(function(r){return r.lesson_date===dateStr(selectedAttendanceDate());}).forEach(function(r){if(!classStudents.some(function(s){return s.id===r.student_id&&s.class_id===r.class_id;}))classStudents.push({id:r.student_id,student_name:r.student_name,class_id:r.class_id,rosterRemoved:true});});
       if (isFirstConnect) {
         localStorage.setItem(LS_KEY, JSON.stringify(cfg));
         showMain();

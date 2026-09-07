@@ -1,0 +1,18 @@
+const assert=require('node:assert/strict');
+const R=require('../weekend-roster.js');
+const snapshot={date:'2026-09-12',version:1,classes:[{class_id:'chidong_sat_1800',expected_count:0,student_ids:[]},{class_id:'hanbaek_sat_1030',expected_count:1,student_ids:['a']},{class_id:'hanbaek_sat_1430',expected_count:1,student_ids:['b']}]};
+assert.deepEqual(R.assignments(snapshot,snapshot.date,'a'),['hanbaek_sat_1030']);
+assert.throws(()=>R.validate(snapshot,'2026-09-19'));
+assert.throws(()=>R.validate({...snapshot,classes:snapshot.classes.slice(1)},snapshot.date));
+assert.throws(()=>R.validate({...snapshot,version:null},snapshot.date));
+const before=[{id:'a',class_id:'hanbaek_sat_1430'},{id:'b',class_id:'hanbaek_sat_1030'}];
+const changed=R.rows(snapshot,snapshot.date,before);
+assert.equal(changed[0].class_id,'hanbaek_sat_1030');
+assert.equal(before[0].class_id,'hanbaek_sat_1430');
+assert.throws(()=>R.rows(snapshot,snapshot.date,[before[0]]));
+const revised=structuredClone(snapshot);revised.version=2;revised.classes[1].student_ids=['b'];revised.classes[2].student_ids=['a'];
+assert.deepEqual(R.assignments(revised,revised.date,'a'),['hanbaek_sat_1430']);
+assert.deepEqual(R.assignments(snapshot,snapshot.date,'a'),['hanbaek_sat_1030']);
+assert.equal(R.diff(snapshot,revised).filter(x=>x.type==='transferred').length,2);
+assert.deepEqual(R.diff(snapshot,snapshot),[]);
+console.log('PASS: date isolation, complete roster, empty class, missing student, temporary transfer, revision preservation');

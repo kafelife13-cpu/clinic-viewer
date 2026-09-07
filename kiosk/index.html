@@ -170,6 +170,7 @@
   .muted-small { color: var(--muted); font-size: 12px; margin-top: 6px; }
 </style>
 <script src="../class-attendance.js"></script>
+<script src="../weekend-roster.js?v=1"></script>
 </head>
 <body>
 <div id="app">
@@ -189,6 +190,7 @@
     </div>
 
     <label style="display:block;margin:16px 0;font-size:17px;font-weight:700">출석 종류 <select id="classMode" style="font:inherit;padding:10px;border-radius:10px"><option value="clinic">클리닉</option><option value="wednesday">수요일 수업</option><option value="weekend">주말 수업</option></select></label>
+    <div id="weekendRosterInfo" role="status" style="font-size:13px;color:#475569;margin:-6px 0 12px;line-height:1.6"></div>
     <div class="phone-display placeholder" id="phoneDisplay">전화번호 뒷자리 4자리</div>
     <div class="keypad" id="keypad">
       <button class="key" data-k="1">1</button>
@@ -561,7 +563,18 @@
   var classMode=state.classMode||(ClassAttendance.dayKey(ClassAttendance.dateKey())==='wed'?'wednesday':'weekend'),classCheckInBusy=false,classPanelRun=0,classTeacherPin='';
   var classModeEl=document.getElementById('classMode');
   classModeEl.value=classMode;
-  classModeEl.addEventListener('change',function(){classMode=this.value;state.classMode=classMode;saveData();phone='';renderPhone();});
+  classModeEl.addEventListener('change',function(){classMode=this.value;state.classMode=classMode;saveData();phone='';renderPhone();refreshWeekendInfo();});
+  var weekendInfoRun=0;
+  function refreshWeekendInfo(){
+    var box=document.getElementById('weekendRosterInfo'),run=++weekendInfoRun;
+    if(classMode!=='weekend'){box.textContent='';return;}
+    var today=ClassAttendance.dateKey(),at=new Date(today+'T12:00:00+09:00'),dow=at.getUTCDay();
+    at.setUTCDate(at.getUTCDate()+(dow===0?-1:6-dow));
+    var sat=ClassAttendance.dateKey(at);at.setUTCDate(at.getUTCDate()+1);var sun=ClassAttendance.dateKey(at);
+    box.textContent='토·일 맥가이 명단 확인 중…';
+    Promise.all([sat,sun].map(function(date){return WeekendRoster.load(state.sbUrl||'',state.sbKey||'',date).then(function(s){return date+' '+s.classes.reduce(function(n,c){return n+c.expected_count;},0)+'명 · v'+s.version;}).catch(function(){return date+' 명단 확인 필요';});})).then(function(labels){if(run===weekendInfoRun)box.textContent=labels.join(' / ')+' · 출석 입력 시 최신 명단 확인';});
+  }
+  setTimeout(refreshWeekendInfo,0);setInterval(refreshWeekendInfo,60000);
   function classRpc(name,payload){
     if(!state.sbUrl||!state.sbKey)return Promise.reject(new Error('출결 서버 연결을 먼저 설정해 주세요.'));
     return new Promise(function(resolve,reject){
@@ -575,9 +588,21 @@
   function syncClassRecord(record){
     return classRpc('check_in_class',{p_student_id:record.student_id,p_student_name:record.student_name,p_class_id:record.class_id,p_checked_in_at:record.checked_in_at}).then(function(data){record.synced=true;record.error='';saveData();return data;}).catch(function(e){record.error=e.message;saveData();throw e;});
   }
+  var weekendResolving=false,classPanelStudents=[];
   function checkInRegularClass(student){
+    if(classMode!=='weekend')return checkInResolvedClass(student,ClassAttendance.find(student.classId));
+    if(weekendResolving||classCheckInBusy)return;
+    var date=ClassAttendance.dateKey();weekendResolving=true;
+    return WeekendRoster.load(state.sbUrl||'',state.sbKey||'',date).then(function(snapshot){
+      if(classMode!=='weekend'||date!==ClassAttendance.dateKey())throw Error('날짜 또는 출석 종류가 바뀌었습니다. 다시 입력해 주세요.');
+      var ids=WeekendRoster.assignments(snapshot,date,student.kingStudentId);
+      if(ids.length!==1)throw Error(ids.length?'오늘 수업이 여러 개입니다. 선생님이 수업별로 확인해 주세요.':'오늘 맥가이 수업 명단에 없습니다. 선생님께 확인해 주세요.');
+      return checkInResolvedClass(student,ClassAttendance.find(ids[0]));
+    }).catch(function(error){showResult('warn','📋',student.name,error.message);}).finally(function(){weekendResolving=false;});
+  }
+  function checkInResolvedClass(student,cls){
     if(classCheckInBusy)return;
-    var cls=ClassAttendance.find(student.classId),date=ClassAttendance.dateKey();
+    var date=ClassAttendance.dateKey();
     if(!cls||!student.kingStudentId){showResult('err','⚠️',student.name,'수업 반이 배정되지 않았습니다. 선생님께 확인해 주세요.');return;}
     if(cls.kind!==classMode||cls.day!==ClassAttendance.dayKey(date)){showResult('warn','📅',student.name,cls.label+' 수업 학생입니다.\n출석 종류와 수업 요일을 확인해 주세요.');return;}
     classCheckInBusy=true;
@@ -607,18 +632,22 @@
     var run=++classPanelRun,date=document.getElementById('attDate').value||ClassAttendance.dateKey();
     return Promise.resolve().then(function(){
       if(!classTeacherPin){summary.innerHTML='<button class="btn btn-ghost" id="unlockClassAttendance">교사 PIN으로 출결 열기</button>';body.innerHTML='';document.getElementById('unlockClassAttendance').onclick=function(){classTeacherPin=prompt('출결 조회용 교사 PIN을 입력하세요.')||'';if(classTeacherPin)renderClassPanel();};return;}
-      return classRpc('teacher_read_attendance',{p_pin:classTeacherPin,p_kind:'class',p_start:date+'T00:00:00+09:00',p_end:date+'T23:59:59.999+09:00'});
-    }).then(function(records){if(!records||run!==classPanelRun)return;
+      return Promise.all([classRpc('teacher_read_attendance',{p_pin:classTeacherPin,p_kind:'class',p_start:date+'T00:00:00+09:00',p_end:date+'T23:59:59.999+09:00'}),WeekendRoster.load(state.sbUrl,state.sbKey,date)]);
+    }).then(function(result){if(!result||run!==classPanelRun)return;
+      var records=result[0],snapshot=result[1];
       var students=state.students.filter(function(s){var c=ClassAttendance.find(s.classId);return s.kingStudentId&&c&&c.day===ClassAttendance.dayKey(date);});
+      if(snapshot)students=WeekendRoster.rows(snapshot,date,state.students.map(function(s){return Object.assign({},s,{id:s.kingStudentId});})).map(function(s){return Object.assign({},s,{id:s.kingStudentId,classId:s.class_id});});
+      records.forEach(function(r){if(!students.some(function(s){return s.kingStudentId===r.student_id&&s.classId===r.class_id;})){var old=state.students.find(function(s){return s.kingStudentId===r.student_id;});students.push(Object.assign({},old||{id:r.student_id,kingStudentId:r.student_id,name:r.student_name},{classId:r.class_id,rosterRemoved:true}));}});
+      classPanelStudents=students;
       students.sort(function(a,b){return ClassAttendance.find(a.classId).start.localeCompare(ClassAttendance.find(b.classId).start)||a.name.localeCompare(b.name,'ko');});
       var count=0;
-      body.innerHTML=students.map(function(s){var c=ClassAttendance.find(s.classId),r=records.find(function(a){return ClassAttendance.matches(a,s.kingStudentId,c.id,date);}),status=ClassAttendance.status(r,c,date);if(r)count++;return '<tr><td>'+escapeHtml(s.name)+'</td><td>'+c.label+'</td><td>'+status.label+'</td><td>'+(r?new Date(r.checked_in_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}):'—')+'</td><td><button class="btn btn-ghost" data-class-id="'+escapeHtml(s.id)+'" data-action="'+(r?'cancel':'present')+'"'+(date>ClassAttendance.dateKey()?' disabled':'')+'>'+(r?'출석 취소':'출석 처리')+'</button></td></tr>';}).join('')||'<tr><td colspan="5">해당 날짜의 수업이 없습니다.</td></tr>';
-      summary.textContent=date+' · '+count+' / '+students.length+'명 출석 · 전송 대기 '+(state.classAttendance||[]).filter(function(r){return !r.synced;}).length+'건';
-    }).catch(function(e){if(run===classPanelRun){summary.textContent='수업 출결 조회 실패 — 새로고침해 주세요.';body.innerHTML='';}});
+      body.innerHTML=students.map(function(s){var c=ClassAttendance.find(s.classId),r=records.find(function(a){return ClassAttendance.matches(a,s.kingStudentId,c.id,date);}),status=ClassAttendance.status(r,c,date);if(r)count++;return '<tr><td>'+escapeHtml(s.name)+(s.rosterRemoved?' (명단 변경 전 출석)':'')+'</td><td>'+c.label+'</td><td>'+status.label+'</td><td>'+(r?new Date(r.checked_in_at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}):'—')+'</td><td><button class="btn btn-ghost" data-class-id="'+escapeHtml(s.id)+'" data-lesson-class="'+c.id+'" data-action="'+(r?'cancel':'present')+'"'+(date>ClassAttendance.dateKey()?' disabled':'')+'>'+(r?'출석 취소':'출석 처리')+'</button></td></tr>';}).join('')||'<tr><td colspan="5">해당 날짜의 수업이 없습니다.</td></tr>';
+      summary.textContent=(snapshot?WeekendRoster.label(snapshot):date)+' · '+count+' / '+students.length+'명 출석 · 전송 대기 '+(state.classAttendance||[]).filter(function(r){return !r.synced;}).length+'건';
+    }).catch(function(e){if(run===classPanelRun){summary.textContent=e.message||'수업 출결 조회 실패 — 새로고침해 주세요.';body.innerHTML='';}});
   }
   document.getElementById('classAttBody').addEventListener('click',function(e){
     var b=e.target.closest('[data-class-id]');if(!b||b.disabled)return;
-    var student=state.students.find(function(s){return s.id===b.dataset.classId;}),date=document.getElementById('attDate').value,action=b.dataset.action;if(!student)return;
+    var student=classPanelStudents.find(function(s){return s.id===b.dataset.classId&&s.classId===b.dataset.lessonClass;}),date=document.getElementById('attDate').value,action=b.dataset.action;if(!student)return;
     if(!confirm(student.name+' · '+date+' 수업 '+(action==='cancel'?'출석을 취소할까요?':'출석 처리할까요?')))return;
     if(!classTeacherPin){classTeacherPin=prompt('출결 서버의 교사 PIN을 입력하세요.')||'';if(!classTeacherPin)return;}
     b.disabled=true;
