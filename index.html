@@ -261,9 +261,8 @@
   var DAY_LABELS = {sun:'일', mon:'월', tue:'화', wed:'수', thu:'목', fri:'금', sat:'토'};
 
   function operationalDate(dateObj) {
-    var d = new Date(dateObj || new Date());
-    if (d.getHours() < 4) d.setDate(d.getDate() - 1);
-    return d;
+    // 출석일은 실제 달력 날짜를 사용하며 자정에 바뀐다.
+    return new Date(dateObj || new Date());
   }
   function todayDayKey() { return DAY_KEYS[operationalDate(new Date()).getDay()]; }
   var selectedDayKey = todayDayKey();
