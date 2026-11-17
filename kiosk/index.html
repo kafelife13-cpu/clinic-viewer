@@ -347,8 +347,8 @@
           <div class="muted-small" id="tgStatus"></div>
         </div>
         <div class="card">
-          <h2>미출석 음성 안내</h2>
-          <div class="muted-small" style="margin-bottom:10px;">클리닉 시작 후 정한 시간이 지나면, 아직 체크인하지 않은 학생 이름을 이 패드 스피커로 읽어 줍니다. 같은 시간대는 한 번만 읽습니다. 이 화면이 켜져 있어야 하고, 패드 소리가 켜져 있어야 합니다.</div>
+          <h2>주말 수업 미출석 음성 안내</h2>
+          <div class="muted-small" style="margin-bottom:10px;">토·일 주말 수업 시작 후 정한 시간이 지나면, 아직 출석하지 않은 학생 이름을 이 패드 스피커로 읽어 줍니다. 클리닉에서는 읽지 않습니다. 수업마다 한 번만 읽으며, 상단 [명단 인증]이 되어 있고 이 화면과 패드 소리가 켜져 있어야 합니다.</div>
           <div class="form-row">
             <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="voiceOn"> 음성 안내 켜기</label>
             <label for="voiceDelay">시작 후</label>
@@ -1332,13 +1332,13 @@
   setInterval(checkWednesdayArrivalSummary, 60 * 1000);
 
   // ---------------- NO-SHOW VOICE ANNOUNCEMENT ----------------
-  // 클리닉 시작 후 voiceDelay분이 지나면 아직 체크인하지 않은 학생 이름을 이 패드에서 한 번 읽는다.
-  // ponytail: 이 패드에 저장된 체크인만 본다. 다른 패드에서 체크인한 학생도 미출석으로 읽힐 수 있으며,
-  // 패드를 여러 대 쓰게 되면 출결 서버(teacher_read_attendance) 기준으로 바꾼다.
+  // 주말 수업 시작 후 voiceDelay분이 지나면 아직 출석하지 않은 학생 이름을 이 패드에서 한 번 읽는다.
+  // 클리닉에서는 읽지 않는다. 명단은 맥가이 주말 명단, 출석은 출결 서버 + 이 패드의 전송 대기 기록 기준.
+  // 명단 인증(교사 PIN)이 된 패드에서만 동작한다.
   if (state.voiceOn === undefined) state.voiceOn = true;
   if (!state.voiceDelay) state.voiceDelay = 10;
   var VOICE_LATE_LIMIT = 60; // 패드를 늦게 켰을 때 한참 지난 시간대를 뒤늦게 읽지 않는다.
-  function nameKey(s) { return (s && s.name || '').replace(/\s/g, ''); }
+  var voiceBusy = false;
   function speakKo(text) {
     var synth = window.speechSynthesis;
     if (!synth || typeof SpeechSynthesisUtterance === 'undefined') return false;
@@ -1355,56 +1355,58 @@
     var h = start.hour % 12 || 12;
     return (start.hour < 12 ? '오전 ' : '오후 ') + h + '시' + (start.minute ? ' ' + start.minute + '분' : '');
   }
-  // 출석 현황 화면과 같은 기준: 오늘 요일 학생 중 이름별 최신 일정 1건.
-  function voiceGroups(now) {
-    var opNow = operationalDate(now);
-    var dKey = todayKey(opNow);
-    var wKey = dayKeyOf(opNow);
-    var arrived = {};
-    state.attendance.forEach(function (a) {
-      if (a.date !== dKey) return;
-      var s = state.students.find(function (x) { return x.id === a.studentId; });
-      if (s) arrived[nameKey(s)] = true;
-    });
-    var byName = {};
-    state.students.filter(function (s) { return s.days.indexOf(wKey) !== -1; }).forEach(function (s) {
-      var key = nameKey(s), old = byName[key];
-      if (!old || !s.weekStart || (old.weekStart && s.weekStart > old.weekStart)) byName[key] = s;
-    });
-    var groups = {};
-    Object.keys(byName).forEach(function (key) {
-      var s = byName[key], start = parseStartTime(s.time);
-      if (!start) return;
-      var slot = ('0' + start.hour).slice(-2) + ':' + ('0' + start.minute).slice(-2);
-      var g = groups[slot] || (groups[slot] = { slot: slot, start: start, late: (now - new Date(now.getFullYear(), now.getMonth(), now.getDate(), start.hour, start.minute)) / 60000, missing: [] });
-      if (!arrived[key]) g.missing.push(s.name);
-    });
-    return Object.keys(groups).sort().map(function (k) {
-      groups[k].missing.sort(function (a, b) { return a.localeCompare(b, 'ko'); });
-      return groups[k];
+  // 오늘 주말 수업별 {cls, late(분), missing(이름)}. 주말이 아니면 빈 배열.
+  function weekendVoiceGroups(now) {
+    var date = ClassAttendance.dateKey(now);
+    var ids = WeekendRoster.required(date);
+    if (!ids.length) return Promise.resolve([]);
+    if (!classTeacherPin) return Promise.reject(new Error('상단 [명단 인증]을 해야 주말 수업 미출석자를 읽을 수 있습니다.'));
+    return Promise.all([
+      classRpc('teacher_read_attendance', { p_pin: classTeacherPin, p_kind: 'class', p_start: date + 'T00:00:00+09:00', p_end: date + 'T23:59:59.999+09:00' }),
+      WeekendRoster.load(state.sbUrl, state.sbKey, date, classTeacherPin)
+    ]).then(function (result) {
+      var records = (result[0] || []).concat(state.classAttendance || []), snapshot = result[1];
+      var names = {};
+      state.students.forEach(function (s) { if (s.kingStudentId) names[s.kingStudentId] = s.name; });
+      return snapshot.classes.map(function (c) {
+        var cls = ClassAttendance.find(c.class_id);
+        var missing = c.student_ids.filter(function (id) {
+          return !records.some(function (r) { return ClassAttendance.matches(r, id, c.class_id, date); });
+        }).map(function (id) { return names[id] || '이름 확인 필요 학생'; });
+        missing.sort(function (a, b) { return a.localeCompare(b, 'ko'); });
+        return { cls: cls, late: (now - new Date(date + 'T' + cls.start + ':00+09:00')) / 60000, missing: missing };
+      }).sort(function (a, b) { return a.cls.start.localeCompare(b.cls.start); });
     });
   }
   function voiceSentence(g) {
-    return spokenTime(g.start) + ' 클리닉, 아직 안 온 학생은 ' + g.missing.join(', ') + ', ' + g.missing.length + '명입니다.';
+    var p = g.cls.start.split(':');
+    return g.cls.label.split(' ')[0] + ' ' + spokenTime({ hour: +p[0], minute: +p[1] }) + ' 수업, 아직 안 온 학생은 ' + g.missing.join(', ') + ', ' + g.missing.length + '명입니다.';
   }
   function checkVoiceNoShows() {
-    if (!state.voiceOn) return;
+    if (!state.voiceOn || voiceBusy) return;
     // 브라우저는 화면을 한 번도 누르지 않은 페이지에서 소리를 막는다. 첫 터치 뒤에 읽도록 기록하지 않고 넘긴다.
     if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
-    var now = new Date(), dKey = todayKey(operationalDate(now));
-    var lines = [], changed = false;
-    voiceGroups(now).forEach(function (g) {
-      if (g.late < state.voiceDelay || g.late > state.voiceDelay + VOICE_LATE_LIMIT) return;
-      var alertKey = dKey + ':voice:' + g.slot;
-      if (state.noShowAlerted[alertKey]) return;
-      if (g.missing.length) lines.push(voiceSentence(g));
-      state.noShowAlerted[alertKey] = true;
-      changed = true;
+    var now = new Date(), date = ClassAttendance.dateKey(now);
+    // 서버 조회 전에 시간표만으로 읽을 시간대가 있는지 먼저 본다.
+    var due = WeekendRoster.required(date).map(ClassAttendance.find).filter(function (cls) {
+      var late = (now - new Date(date + 'T' + cls.start + ':00+09:00')) / 60000;
+      return late >= state.voiceDelay && late <= state.voiceDelay + VOICE_LATE_LIMIT && !state.noShowAlerted[date + ':voice:' + cls.id];
     });
-    if (lines.length && !speakKo(lines.join(' '))) {
-      document.getElementById('voiceStatus').textContent = '이 기기 브라우저는 음성 읽기를 지원하지 않습니다.';
-    }
-    if (changed) saveData();
+    if (!due.length) return;
+    voiceBusy = true;
+    weekendVoiceGroups(now).then(function (groups) {
+      var lines = [];
+      groups.forEach(function (g) {
+        if (!due.some(function (cls) { return cls.id === g.cls.id; })) return;
+        if (g.missing.length) lines.push(voiceSentence(g));
+        state.noShowAlerted[date + ':voice:' + g.cls.id] = true;
+      });
+      saveData();
+      if (lines.length && !speakKo(lines.join(' '))) document.getElementById('voiceStatus').textContent = '이 기기 브라우저는 음성 읽기를 지원하지 않습니다.';
+    }).catch(function (e) {
+      // 명단·출석을 확인하지 못하면 읽지 않고 다음 확인 때 다시 시도한다.
+      document.getElementById('voiceStatus').textContent = '음성 안내 대기: ' + e.message;
+    }).then(function () { voiceBusy = false; });
   }
   checkVoiceNoShows();
   setInterval(checkVoiceNoShows, 30 * 1000);
@@ -1416,10 +1418,13 @@
     document.getElementById('voiceStatus').textContent = state.voiceOn ? '저장되었습니다. 클리닉 시작 ' + state.voiceDelay + '분 뒤에 미출석자를 읽습니다.' : '음성 안내를 껐습니다.';
   });
   document.getElementById('voiceTestBtn').addEventListener('click', function () {
-    var now = new Date();
-    var started = voiceGroups(now).filter(function (g) { return g.late >= 0 && g.missing.length; });
-    var text = started.length ? started.map(voiceSentence).join(' ') : '지금 시작한 클리닉에 미출석 학생이 없습니다.';
-    document.getElementById('voiceStatus').textContent = speakKo(text) ? '🔊 ' + text : '이 기기 브라우저는 음성 읽기를 지원하지 않습니다.';
+    var status = document.getElementById('voiceStatus');
+    status.textContent = '주말 수업 명단 확인 중…';
+    weekendVoiceGroups(new Date()).then(function (groups) {
+      var started = groups.filter(function (g) { return g.late >= 0 && g.missing.length; });
+      var text = !groups.length ? '오늘은 주말 수업이 없습니다.' : started.length ? started.map(voiceSentence).join(' ') : '지금 시작한 주말 수업에 미출석 학생이 없습니다.';
+      status.textContent = speakKo(text) ? '🔊 ' + text : '이 기기 브라우저는 음성 읽기를 지원하지 않습니다.';
+    }).catch(function (e) { status.textContent = e.message; });
   });
 
   function syncRosterToCloud() {
